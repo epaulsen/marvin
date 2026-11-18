@@ -1,0 +1,7 @@
+**
+!Dockerfile
+!src/
+!src/marvin.api/
+!src/marvin.api/**
+**/bin/
+**/obj/

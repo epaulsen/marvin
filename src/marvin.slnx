@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="marvin.api/marvin.api.csproj" />
+  <Project Path="../tests/marvin.api.tests/marvin.api.tests.csproj" />
+</Solution>
