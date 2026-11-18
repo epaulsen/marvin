@@ -31,5 +31,5 @@ gatewayen i testprosessen, så verken Docker eller en separat gateway trengs.
 GitHub Actions kjører samme tester ved pull requests.
 
 ```sh
-dotnet test --solution src/marvin.slnx --configuration Release
+dotnet test --solution marvin.slnx --configuration Release
 ```

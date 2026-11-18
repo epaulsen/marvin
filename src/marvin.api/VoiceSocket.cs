@@ -3,13 +3,13 @@ using System.Text.Json;
 
 namespace Marvin.Api;
 
-internal static class VoiceSocket
+internal sealed class VoiceSocket(ILogger<VoiceSocket> logger)
 {
     private const int MaxAudioBytes = 16_000 * 2 * 60;
     private static readonly TimeSpan IdleTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan CloseTimeout = TimeSpan.FromSeconds(2);
 
-    public static async Task ReceiveAsync(HttpContext context, ILogger logger)
+    public async Task ReceiveAsync(HttpContext context)
     {
         if (!context.WebSockets.IsWebSocketRequest)
         {

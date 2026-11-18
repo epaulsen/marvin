@@ -16,4 +16,4 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '11.0.x'
-      - run: dotnet test --solution src/marvin.slnx --configuration Release
+      - run: dotnet test --solution marvin.slnx --configuration Release
