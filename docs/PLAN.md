@@ -96,10 +96,10 @@ Gateway returnerer JSON
 
 ### Senere fase – AI-agent og verktøy
 
-- Legge til agent som konsumerer JSON-resultatet.
-- Integrere MCP-verktøy for Home Assistant, Entur og eventuelle andre tjenester.
+- En agentkomponent i gatewayen bruker OpenAIs .NET SDK og mottar transkripsjonen.
+- Home Assistant MCP kan aktiveres for eksponerte enheter; Entur og andre verktøy kommer senere.
 - Bruke den eksisterende TTS-tjenesten i Home Assistant til å gjøre agentsvar om til tale. Gatewayen henter lyden og sender den til Voice PE som 24 kHz, 16-bit mono PCM.
-- Beholde taleinngang og agent som separate komponenter.
+- Beholde taleinngang og agent som separate komponenter i samme prosess.
 
 ## Første leveranses akseptansekriterier
 

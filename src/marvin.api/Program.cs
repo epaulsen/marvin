@@ -15,6 +15,13 @@ builder.Services.AddHttpClient<IVoiceTranscriber, OpperTranscriber>(client =>
 builder.Services.AddHttpClient<IVoiceSynthesizer, HomeAssistantSynthesizer>()
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
     .RemoveAllLoggers();
+builder.Services.AddHttpClient("home-assistant-mcp")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+    .RemoveAllLoggers();
+builder.Services.AddScoped<IChatCompletionClient, OpenAiChatCompletionClient>();
+builder.Services.AddScoped<IAgentToolProvider, HomeAssistantToolProvider>();
+builder.Services.AddScoped<IVoiceAssistant, OpenAiVoiceAssistant>();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<IVoiceTurnProcessor, TranscribingVoiceTurnProcessor>();
 builder.Services.AddScoped<VoiceSocket>();
 
@@ -27,6 +34,8 @@ else
     app.Logger.LogInformation("Opper transcription is configured");
 if (!HomeAssistantSynthesizer.IsConfigured(app.Configuration))
     app.Logger.LogWarning("Home Assistant TTS is not configured; voice responses are disabled");
+if (string.IsNullOrWhiteSpace(app.Configuration["OPENAI_API_KEY"]))
+    app.Logger.LogWarning("OPENAI_API_KEY is not configured; transcripts will be echoed");
 _ = app.Services.GetRequiredService<IVoiceActivityDetectorFactory>();
 app.Logger.LogInformation("Voice activity detector initialized");
 app.UseWebSockets();
