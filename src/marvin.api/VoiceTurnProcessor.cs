@@ -6,8 +6,22 @@ internal interface IVoiceTurnProcessor
     Task<byte[]?> ProcessAsync(byte[] audio, CancellationToken cancellationToken);
 }
 
-internal sealed class NoOpVoiceTurnProcessor : IVoiceTurnProcessor
+internal sealed class TranscribingVoiceTurnProcessor(
+    IVoiceTranscriber transcriber,
+    IConfiguration configuration,
+    ILogger<TranscribingVoiceTurnProcessor> logger) : IVoiceTurnProcessor
 {
-    public Task<byte[]?> ProcessAsync(byte[] audio, CancellationToken cancellationToken) =>
-        Task.FromResult<byte[]?>(null);
+    public async Task<byte[]?> ProcessAsync(byte[] audio, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(configuration["OPPER_API_KEY"]))
+            return null;
+
+        var text = await transcriber.TranscribeAsync(audio, cancellationToken);
+        if (configuration.GetValue<bool>("Marvin:LogTranscripts"))
+            logger.LogInformation("Transcript: {Transcript}", text);
+        else
+            logger.LogInformation("Transcription completed");
+
+        return null;
+    }
 }

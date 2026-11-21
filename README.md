@@ -29,10 +29,26 @@ igjen. Stillhet mens enheten er inaktiv lukker ikke forbindelsen.
 
 Silero VAD identifiserer tale lokalt og avslutter en ytring etter 800 ms stillhet.
 Gatewayen sender fasene `listening`, `thinking` og `idle`. `replying` og binær
-24 kHz PCM sendes hvis en talebehandler leverer et lydsvar. Standardbehandleren
-er foreløpig tom: ingen transkripsjon, agent, talesyntese eller lydsvar er
-implementert. Oppfølgingsvindu er derfor deaktivert (`follow_up_ms: 0`).
-Ytringer begrenses til 60 sekunder, holdes kun i minnet og slettes etter bruk.
+24 kHz PCM sendes hvis en talebehandler leverer et lydsvar. Agent, talesyntese
+og lydsvar er ikke implementert, og oppfølgingsvinduet er deaktivert
+(`follow_up_ms: 0`).
+
+Sett miljøvariabelen `OPPER_API_KEY` for å aktivere transkripsjon med
+NB-Whisper Large via Opper/Berget. Uten nøkkel er transkripsjon deaktivert.
+Etter VAD sendes hele ytringen som WAV i en base64-data-URI; Opper støtter
+ikke direkte binærlyd på transkripsjonsendepunktet. Ytringer begrenses til
+60 sekunder og lagres ikke som filer av gatewayen.
+
+Lyd sendes til en ekstern tjeneste. Sjekk personvern- og lagringsvilkår før
+bruk. Transkripsjonen logges ikke som standard; sett `Marvin__LogTranscripts`
+til `true` for å vise teksten i gatewayens logger. Unngå dette dersom loggene
+ikke er egnet for sensitivt innhold.
+
+Eksempel med Docker når `OPPER_API_KEY` allerede er satt i miljøet:
+
+```sh
+docker run --rm -p 127.0.0.1:8080:8080 -e OPPER_API_KEY -e Marvin__LogTranscripts=true marvin-api
+```
 
 Den medfølgende [Silero-modellen](https://github.com/snakers4/silero-vad/blob/066409f3d9db45a30d21dfcbf9147826ffdd7052/src/silero_vad/data/silero_vad.onnx)
 er MIT-lisensiert. SHA-256:
