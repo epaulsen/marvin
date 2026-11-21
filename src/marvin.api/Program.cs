@@ -1,4 +1,6 @@
 using Marvin.Api;
+using OpenTelemetry.Logs;
+using OpenTelemetry.Resources;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration
@@ -7,6 +9,18 @@ builder.Configuration
 if (builder.Environment.IsDevelopment())
     builder.Configuration.AddUserSecrets<Program>(optional: true);
 builder.Configuration.AddEnvironmentVariables().AddCommandLine(args);
+
+if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
+{
+    builder.Logging.AddOpenTelemetry(options =>
+    {
+        options.SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("marvin"));
+        options.IncludeFormattedMessage = true;
+        options.IncludeScopes = true;
+        options.ParseStateValues = true;
+        options.AddOtlpExporter();
+    });
+}
 
 builder.Services.AddHealthChecks();
 builder.Services.AddSingleton<IVoiceActivityDetectorFactory, SileroVadModel>();

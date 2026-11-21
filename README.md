@@ -31,6 +31,21 @@ compose-kommandoene for å laste ned imaget og opprette containeren på nytt.
 Begrens tilgang til `.env`, som inneholder API-nøkler, og sørg for at Home
 Assistant-adressen kan nås fra containeren.
 
+Compose starter også Aspire Dashboard på `http://<serveradresse>:18888`.
+Marvins strukturerte logger vises under **Structured logs**. Dashboardet krever
+ikke innlogging, og alle på nettverket med tilgang til porten kan lese loggene.
+Begrens tilgangen med brannmur, og ikke eksponer porten mot internett. Sett
+`ASPIRE_DASHBOARD_HOST_IP` til et bestemt grensesnitt eller `127.0.0.1` for å
+begrense bindingen. OTLP-mottaket er ikke publisert til vertsmaskinen.
+Dashboardet er for kortvarig feilsøking, ikke permanent logglagring.
+Ved kjøring uten Compose aktiveres eksport bare når `OTEL_EXPORTER_OTLP_ENDPOINT`
+er konfigurert; konsollogging fungerer fortsatt som før.
+Loggene kan også leses uten nettleser, for eksempel med Aspire CLI eller:
+
+```sh
+curl 'http://<serveradresse>:18888/api/telemetry/logs?resource=marvin'
+```
+
 Når en pull request merges til `main`, bygger GitHub Actions et `linux/amd64`-
 image og publiserer `epaulsen/marvin:latest`. Workflowen krever GitHub Actions-
 secrets `DOCKERHUB_USERNAME` og `DOCKERHUB_TOKEN`, der tokenet har push-tilgang

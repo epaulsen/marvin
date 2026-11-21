@@ -8,14 +8,35 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using OpenAI.Chat;
+using OpenTelemetry.Logs;
 using Xunit;
 
 namespace Marvin.Api.Tests;
 
 public sealed class VoiceGatewayTests
 {
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("http://127.0.0.1:4318", true)]
+    public async Task OpenTelemetryLoggingIsEnabledOnlyWithAnEndpoint(string endpoint, bool enabled)
+    {
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint);
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IVoiceActivityDetectorFactory>();
+                services.AddSingleton<IVoiceActivityDetectorFactory, TestDetectorFactory>();
+            });
+        });
+
+        var providers = factory.Services.GetServices<ILoggerProvider>();
+        Assert.Equal(enabled, providers.Any(provider => provider is OpenTelemetryLoggerProvider));
+    }
+
     [Theory(Timeout = 10_000)]
     [InlineData("/health", HttpStatusCode.OK)]
     [InlineData("/voice", HttpStatusCode.BadRequest)]
