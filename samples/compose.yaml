@@ -19,9 +19,19 @@ services:
       Logging__LogLevel__Marvin.Api: ${LOG_LEVEL_MARVIN:-Debug}
       Logging__LogLevel__Microsoft.AspNetCore: ${LOG_LEVEL_ASPNETCORE:-Warning}
       Logging__Console__IncludeScopes: ${LOG_INCLUDE_SCOPES:-true}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://aspire-dashboard:18890
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:${MARVIN_CONTAINER_PORT:-8080}/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  aspire-dashboard:
+    image: mcr.microsoft.com/aspire/dashboard:17.0.0
+    restart: unless-stopped
+    ports:
+      - "${ASPIRE_DASHBOARD_HOST_IP:-0.0.0.0}:${ASPIRE_DASHBOARD_PORT:-18888}:18888"
+    environment:
+      ASPIRE_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
