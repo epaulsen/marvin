@@ -36,6 +36,8 @@ image og publiserer `epaulsen/marvin:latest`. Workflowen krever GitHub Actions-
 secrets `DOCKERHUB_USERNAME` og `DOCKERHUB_TOKEN`, der tokenet har push-tilgang
 til Docker Hub-repositoriet. Legg dem inn under **Settings → Secrets and
 variables → Actions** i GitHub-repositoriet.
+Workflowen kan også startes manuelt fra Actions eller med
+`gh workflow run publish-image.yml --ref main`; den bygger da siste `main`.
 
 `GET /health` er HTTP-probe for k3s. WebSocket-endepunktet `/voice` har foreløpig
 ingen autentisering. Gatewayen lytter på `0.0.0.0:8080`; begrens tilgangen
