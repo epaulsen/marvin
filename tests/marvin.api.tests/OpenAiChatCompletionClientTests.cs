@@ -29,11 +29,15 @@ public sealed class OpenAiChatCompletionClientTests
             Assert.Equal(200, json.RootElement.GetProperty("max_completion_tokens").GetInt32());
             Assert.False(json.RootElement.GetProperty("store").GetBoolean());
             Assert.Single(json.RootElement.GetProperty("tools").EnumerateArray());
+            var schema = json.RootElement.GetProperty("response_format").GetProperty("json_schema");
+            Assert.True(schema.GetProperty("strict").GetBoolean());
+            Assert.Equal("boolean", schema.GetProperty("schema").GetProperty("properties")
+                .GetProperty("needs_follow_up").GetProperty("type").GetString());
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent("""
                     {"id":"test","object":"chat.completion","created":1700000000,"model":"gpt-6-luna",
-                     "choices":[{"index":0,"message":{"role":"assistant","content":"Hei tilbake"},"finish_reason":"stop"}]}
+                     "choices":[{"index":0,"message":{"role":"assistant","content":"{\"text\":\"Hei tilbake\",\"needs_follow_up\":false}"},"finish_reason":"stop"}]}
                     """, Encoding.UTF8, "application/json")
             };
         });
@@ -44,7 +48,7 @@ public sealed class OpenAiChatCompletionClientTests
         var client = new OpenAiChatCompletionClient(new ConfigurationBuilder().Build(), sdk);
         var response = await client.CompleteAsync([new UserChatMessage("Hei")],
             [ChatTool.CreateFunctionTool("test_tool", "Test")], TestContext.Current.CancellationToken);
-        Assert.Equal("Hei tilbake", response.Content[0].Text);
+        Assert.Equal("""{"text":"Hei tilbake","needs_follow_up":false}""", response.Content[0].Text);
     }
 
     [Fact]
@@ -78,6 +82,30 @@ public sealed class OpenAiChatCompletionClientTests
 
         Assert.Equal(new VoiceAssistantResponse("Hvilket rom?", true),
             await assistant.ReplyAsync("Slå på lyset", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task StructuredFollowUpRoundTripsThroughOfficialSdk()
+    {
+        var handler = new TestHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+                {"id":"test","object":"chat.completion","created":1700000000,"model":"gpt-6-luna",
+                 "choices":[{"index":0,"message":{"role":"assistant",
+                 "content":"{\"text\":\"Hva heter varmepumpen?\",\"needs_follow_up\":true}"},"finish_reason":"stop"}]}
+                """, Encoding.UTF8, "application/json")
+        }));
+        var sdk = new ChatClient("gpt-6-luna", new ApiKeyCredential("test-key"), new OpenAIClientOptions
+        {
+            Transport = new HttpClientPipelineTransport(new HttpClient(handler))
+        });
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
+        var assistant = new OpenAiVoiceAssistant(new OpenAiChatCompletionClient(configuration, sdk),
+            new DisabledToolProvider(), configuration, TimeProvider.System, NullLogger<OpenAiVoiceAssistant>.Instance);
+
+        Assert.Equal(new VoiceAssistantResponse("Hva heter varmepumpen?", true),
+            await assistant.ReplyAsync("Sett temperaturen", TestContext.Current.CancellationToken));
     }
 
     private sealed class DisabledToolProvider : IAgentToolProvider

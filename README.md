@@ -54,9 +54,9 @@ Silero VAD identifiserer tale lokalt og avslutter en ytring etter 800 ms stillhe
 Gatewayen sender fasene `listening`, `thinking`, `replying` og `idle`. Med
 OpenAI og TTS konfigurert sendes transkripsjonen til agenten, og svaret spilles
 av som 24 kHz PCM. Automatisk lytting etter alle svar er deaktivert
-(`follow_up_ms: 0`). Når agenten trenger en avklaring, kan den i stedet bruke
-`ask_user`: spørsmålet leses opp, og en kompatibel Voice PE-firmware åpner et
-kort oppfølgingsvindu uten vekkeord. Hvis ingen svarer, lukkes mikrofonen.
+(`follow_up_ms: 0`). Når agenten trenger en avklaring, kan den bruke `ask_user`
+eller angi dette i svaret: spørsmålet leses opp, og en kompatibel Voice PE-firmware
+åpner et kort oppfølgingsvindu uten vekkeord. Hvis ingen svarer, lukkes mikrofonen.
 
 Sett miljøvariabelen `OPPER_API_KEY` for å aktivere transkripsjon med
 NB-Whisper Large via Opper/Berget. Ved lokal debugging kan nøkkelen i stedet
@@ -103,6 +103,7 @@ et pålitelig nettverk for å beskytte token og taleinnhold.
 
 Sett `OPENAI_API_KEY` i miljøet eller utviklingsfilen. Konfigurer eventuelt
 `OpenAI:Model` (miljøvariabel `OpenAI__Model`); standard er `gpt-6-luna`.
+Modellen må støtte strukturerte svar (JSON Schema) og verktøykall.
 En OpenAI API-nøkkel og API-fakturering kreves. Uten nøkkel leses
 transkripsjonen tilbake som før.
 
@@ -118,6 +119,7 @@ Home Assistant-URL og token, og kobler lokalt til `/api/mcp/assist`. Bare
 enheter eksponert for Home Assistants stemmeassistenter er tilgjengelige.
 Gatewayen krever ikke at Home Assistant eksponeres mot internett. Når MCP er
 aktivert, feiler taleturen hvis MCP-tilkoblingen ikke virker.
+Verktøykall logges med navn, status og varighet, men uten argumenter og resultater.
 
 **Enhetsstyring skjer uten ekstra bekreftelse.** WebSocket-endepunktet har ingen
 autentisering, så alle med tilgang kan sende forespørsler som styrer eksponerte
