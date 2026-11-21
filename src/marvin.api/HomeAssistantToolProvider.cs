@@ -12,8 +12,10 @@ internal interface IAgentToolProvider
 internal interface IAgentToolSession : IAsyncDisposable
 {
     IReadOnlyList<ChatTool> Tools { get; }
-    Task<string> CallAsync(string name, string arguments, CancellationToken cancellationToken);
+    Task<AgentToolResult> CallAsync(string name, string arguments, CancellationToken cancellationToken);
 }
+
+internal sealed record AgentToolResult(string Content, bool IsError = false);
 
 internal sealed class HomeAssistantToolProvider(IConfiguration configuration, IHttpClientFactory clientFactory) : IAgentToolProvider
 {
@@ -79,7 +81,7 @@ internal sealed class HomeAssistantToolProvider(IConfiguration configuration, IH
 
         public IReadOnlyList<ChatTool> Tools { get; }
 
-        public async Task<string> CallAsync(string name, string arguments, CancellationToken cancellationToken)
+        public async Task<AgentToolResult> CallAsync(string name, string arguments, CancellationToken cancellationToken)
         {
             if (!tools.TryGetValue(name, out var tool) || arguments.Length > 32_768)
                 throw new InvalidDataException("OpenAI requested an invalid Home Assistant tool.");
@@ -100,7 +102,7 @@ internal sealed class HomeAssistantToolProvider(IConfiguration configuration, IH
             var json = JsonSerializer.Serialize(result);
             if (json.Length > 32_768)
                 throw new InvalidDataException("Home Assistant returned an oversized tool result.");
-            return json;
+            return new AgentToolResult(json, result.IsError == true);
         }
 
         public async ValueTask DisposeAsync()

@@ -21,11 +21,25 @@ public sealed class HomeAssistantToolProviderTests
             session.CallAsync("ask_user", """{"question":"Test?"}""", TestContext.Current.CancellationToken));
         var result = await session.CallAsync("light__HassTurnOn", """{"name":"Kjøkken"}""",
             TestContext.Current.CancellationToken);
-        Assert.Contains("Done", result);
+        Assert.Contains("Done", result.Content);
+        Assert.False(result.IsError);
         Assert.Equal("Kjøkken", handler.LightName);
         Assert.Contains("initialize", handler.Methods);
         Assert.Contains("tools/list", handler.Methods);
         Assert.Contains("tools/call", handler.Methods);
+    }
+
+    [Fact]
+    public async Task PreservesMcpToolErrorStatus()
+    {
+        var handler = new McpHandler(toolIsError: true);
+        var provider = new HomeAssistantToolProvider(Configuration(true), new TestHttpClientFactory(handler));
+        await using var session = await provider.OpenAsync(TestContext.Current.CancellationToken);
+        Assert.NotNull(session);
+        var result = await session.CallAsync("light__HassTurnOn", """{"name":"Kjøkken"}""",
+            TestContext.Current.CancellationToken);
+        Assert.True(result.IsError);
+        Assert.Contains("Done", result.Content);
     }
 
     [Fact]
@@ -50,7 +64,7 @@ public sealed class HomeAssistantToolProviderTests
         public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
     }
 
-    private sealed class McpHandler : HttpMessageHandler
+    private sealed class McpHandler(bool toolIsError = false) : HttpMessageHandler
     {
         public List<string> Methods { get; } = [];
         public string? LightName { get; private set; }
@@ -90,7 +104,7 @@ public sealed class HomeAssistantToolProviderTests
                 case "tools/call":
                     Assert.Equal("light__HassTurnOn", root.GetProperty("params").GetProperty("name").GetString());
                     LightName = root.GetProperty("params").GetProperty("arguments").GetProperty("name").GetString();
-                    result = """{"content":[{"type":"text","text":"Done"}],"isError":false}""";
+                    result = $$"""{"content":[{"type":"text","text":"Done"}],"isError":{{(toolIsError ? "true" : "false")}}}""";
                     break;
                 default:
                     throw new InvalidOperationException($"Unexpected MCP method: {method}");

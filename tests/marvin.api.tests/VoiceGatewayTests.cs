@@ -119,11 +119,13 @@ public sealed class VoiceGatewayTests
         Assert.Equal("Hei tilbake", synthesizer.Text);
     }
 
-    [Fact(Timeout = 10_000)]
-    public async Task ClarificationRequestsFollowUpAndAcceptsSpeechWithoutWake()
+    [Theory(Timeout = 10_000)]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ClarificationRequestsFollowUpAndAcceptsSpeechWithoutWake(bool useTool)
     {
         TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
-        var chat = new FollowUpChatCompletionClient();
+        var chat = new FollowUpChatCompletionClient(useTool);
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["OPENAI_API_KEY"] = "test-key",
@@ -522,7 +524,8 @@ public sealed class VoiceGatewayTests
         public Task<ChatCompletion> CompleteAsync(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatTool> tools,
             CancellationToken cancellationToken) =>
             Task.FromResult(OpenAIChatModelFactory.ChatCompletion(finishReason: ChatFinishReason.Stop,
-                content: new ChatMessageContent("Hei tilbake"), role: ChatMessageRole.Assistant));
+                content: new ChatMessageContent("""{"text":"Hei tilbake","needs_follow_up":false}"""),
+                role: ChatMessageRole.Assistant));
 #pragma warning restore OPENAI001
     }
 
@@ -532,7 +535,7 @@ public sealed class VoiceGatewayTests
             Task.FromResult<IAgentToolSession?>(null);
     }
 
-    private sealed class FollowUpChatCompletionClient : IChatCompletionClient
+    private sealed class FollowUpChatCompletionClient(bool useTool) : IChatCompletionClient
     {
         public List<IReadOnlyList<ChatMessage>> Requests { get; } = [];
 
@@ -541,13 +544,16 @@ public sealed class VoiceGatewayTests
             CancellationToken cancellationToken)
         {
             Requests.Add(messages.ToArray());
-            return Task.FromResult(Requests.Count == 1
+            return Task.FromResult(Requests.Count == 1 && useTool
                 ? OpenAIChatModelFactory.ChatCompletion(finishReason: ChatFinishReason.ToolCalls,
                     content: new ChatMessageContent(), role: ChatMessageRole.Assistant,
                     toolCalls: [ChatToolCall.CreateFunctionToolCall("call-1", "ask_user",
                         BinaryData.FromString("""{"question":"Hvilket rom?"}"""))])
                 : OpenAIChatModelFactory.ChatCompletion(finishReason: ChatFinishReason.Stop,
-                    content: new ChatMessageContent("Ferdig."), role: ChatMessageRole.Assistant));
+                    content: new ChatMessageContent(Requests.Count == 1
+                        ? """{"text":"Hvilket rom?","needs_follow_up":true}"""
+                        : """{"text":"Ferdig.","needs_follow_up":false}"""),
+                    role: ChatMessageRole.Assistant));
         }
 #pragma warning restore OPENAI001
     }

@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Marvin.Api;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using OpenAI.Chat;
 using Xunit;
@@ -91,6 +93,81 @@ public sealed class OpenAiVoiceAssistantTests
         Assert.Equal("Kjøkkenet", Assert.IsType<UserChatMessage>(client.Requests[1][3]).Content[0].Text);
     }
 
+    [Fact]
+    public async Task StructuredReplyCanRequestFollowUpAfterToolFailure()
+    {
+        var toolSession = new TestToolSession("""{"isError":true}""", isError: true);
+        var client = new TestChatClient((_, index) => index == 0
+            ? ToolResult("turn_on", """{"name":"Stua"}""")
+            : Result("Jeg fant ingen varmepumpe. Hva heter den?", requestFollowUp: true));
+        var assistant = CreateAssistant(client, new TestToolProvider(toolSession), new TestClock());
+
+        var response = await assistant.ReplyAsync("Sett temperaturen", TestContext.Current.CancellationToken);
+        Assert.Equal(new VoiceAssistantResponse("Jeg fant ingen varmepumpe. Hva heter den?", true), response);
+        Assert.Equal("""{"isError":true}""", Assert.IsType<ToolChatMessage>(client.Requests[1][^1]).Content[0].Text);
+    }
+
+    [Fact]
+    public async Task PunctuationAloneDoesNotRequestFollowUp()
+    {
+        var client = new TestChatClient((_, _) => Result("Ikke sant?"));
+        var assistant = CreateAssistant(client, new TestToolProvider(), new TestClock());
+        Assert.Equal(new VoiceAssistantResponse("Ikke sant?"),
+            await assistant.ReplyAsync("Si noe", TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("""{"text":"Svar","needs_follow_up":"true"}""")]
+    [InlineData("""{"text":" ","needs_follow_up":true}""")]
+    [InlineData("plain text")]
+    public async Task InvalidStructuredResponseIsRejected(string content)
+    {
+        var client = new TestChatClient((_, _) => RawResult(content));
+        var assistant = CreateAssistant(client, new TestToolProvider(), new TestClock());
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            assistant.ReplyAsync("Spørsmål", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ToolCallsLogNamesStatusAndDurationWithoutSensitiveContent()
+    {
+        var logger = new CapturingLogger<OpenAiVoiceAssistant>();
+        var client = new TestChatClient((_, index) => index == 0
+            ? ToolResult("turn_on", """{"name":"private argument"}""")
+            : ToolResult("ask_user", """{"question":"private question"}"""));
+        var session = new TestToolSession("private result", isError: true);
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
+        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(session), configuration,
+            new TestClock(), logger);
+
+        await assistant.ReplyAsync("Spørsmål", TestContext.Current.CancellationToken);
+
+        Assert.Contains(logger.Messages, entry => entry.Contains("Tool call started: turn_on"));
+        Assert.Contains(logger.Messages, entry => entry.Contains("turn_on; status: reported error; duration:"));
+        Assert.Contains(logger.Messages, entry => entry.Contains("Tool call started: ask_user"));
+        Assert.Contains(logger.Messages, entry => entry.Contains("ask_user; status: completed; duration:"));
+        Assert.DoesNotContain(logger.Messages, entry => entry.Contains("private", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task FailedToolCallIsLoggedWithoutItsArguments()
+    {
+        var logger = new CapturingLogger<OpenAiVoiceAssistant>();
+        var client = new TestChatClient((_, _) => ToolResult("ask_user", "private invalid json"));
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
+        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(), configuration,
+            new TestClock(), logger);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            assistant.ReplyAsync("Spørsmål", TestContext.Current.CancellationToken));
+
+        Assert.Contains(logger.Messages, entry => entry.Contains("Tool call failed: ask_user; duration:"));
+        Assert.DoesNotContain(logger.Messages, entry => entry.Contains("private", StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData("{}")]
     [InlineData("""{"question":"  "}""")]
@@ -154,8 +231,14 @@ public sealed class OpenAiVoiceAssistantTests
     }
 
 #pragma warning disable OPENAI001
-    private static ChatCompletion Result(string text, ChatFinishReason reason = ChatFinishReason.Stop) =>
-        OpenAIChatModelFactory.ChatCompletion(finishReason: reason, content: new ChatMessageContent(text), role: ChatMessageRole.Assistant);
+    private static ChatCompletion Result(string text, ChatFinishReason reason = ChatFinishReason.Stop, bool requestFollowUp = false) =>
+        OpenAIChatModelFactory.ChatCompletion(finishReason: reason,
+            content: new ChatMessageContent(JsonSerializer.Serialize(new { text, needs_follow_up = requestFollowUp })),
+            role: ChatMessageRole.Assistant);
+
+    private static ChatCompletion RawResult(string text) =>
+        OpenAIChatModelFactory.ChatCompletion(finishReason: ChatFinishReason.Stop, content: new ChatMessageContent(text),
+            role: ChatMessageRole.Assistant);
 
     private static ChatCompletion ToolResult(string name, string arguments) =>
         OpenAIChatModelFactory.ChatCompletion(finishReason: ChatFinishReason.ToolCalls,
@@ -207,20 +290,29 @@ public sealed class OpenAiVoiceAssistantTests
         }
     }
 
-    private sealed class TestToolSession : IAgentToolSession
+    private sealed class TestToolSession(string content = "ok", bool isError = false) : IAgentToolSession
     {
         public (string Name, string Arguments) Call { get; private set; }
         public bool Disposed { get; private set; }
         public IReadOnlyList<ChatTool> Tools { get; } = [ChatTool.CreateFunctionTool("turn_on", "Turn on")];
-        public Task<string> CallAsync(string name, string arguments, CancellationToken cancellationToken)
+        public Task<AgentToolResult> CallAsync(string name, string arguments, CancellationToken cancellationToken)
         {
             Call = (name, arguments);
-            return Task.FromResult("ok");
+            return Task.FromResult(new AgentToolResult(content, isError));
         }
         public ValueTask DisposeAsync()
         {
             Disposed = true;
             return ValueTask.CompletedTask;
         }
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
     }
 }
