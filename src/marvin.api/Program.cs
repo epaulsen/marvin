@@ -12,6 +12,9 @@ builder.Services.AddHealthChecks();
 builder.Services.AddSingleton<IVoiceActivityDetectorFactory, SileroVadModel>();
 builder.Services.AddHttpClient<IVoiceTranscriber, OpperTranscriber>(client =>
     client.BaseAddress = new Uri("https://api.opper.ai/"));
+builder.Services.AddHttpClient<IVoiceSynthesizer, HomeAssistantSynthesizer>()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+    .RemoveAllLoggers();
 builder.Services.AddScoped<IVoiceTurnProcessor, TranscribingVoiceTurnProcessor>();
 builder.Services.AddScoped<VoiceSocket>();
 
@@ -22,6 +25,8 @@ if (string.IsNullOrWhiteSpace(app.Configuration["OPPER_API_KEY"]))
     app.Logger.LogWarning("OPPER_API_KEY is not configured; transcription is disabled");
 else
     app.Logger.LogInformation("Opper transcription is configured");
+if (!HomeAssistantSynthesizer.IsConfigured(app.Configuration))
+    app.Logger.LogWarning("Home Assistant TTS is not configured; voice responses are disabled");
 _ = app.Services.GetRequiredService<IVoiceActivityDetectorFactory>();
 app.Logger.LogInformation("Voice activity detector initialized");
 app.UseWebSockets();

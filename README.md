@@ -29,10 +29,9 @@ forkaster ufullstendig lyd. Etter avsluttet svar kan samme forbindelse brukes
 igjen. Stillhet mens enheten er inaktiv lukker ikke forbindelsen.
 
 Silero VAD identifiserer tale lokalt og avslutter en ytring etter 800 ms stillhet.
-Gatewayen sender fasene `listening`, `thinking` og `idle`. `replying` og binær
-24 kHz PCM sendes hvis en talebehandler leverer et lydsvar. Agent, talesyntese
-og lydsvar er ikke implementert, og oppfølgingsvinduet er deaktivert
-(`follow_up_ms: 0`).
+Gatewayen sender fasene `listening`, `thinking`, `replying` og `idle`. Med TTS
+konfigurert leses transkripsjonen tilbake som 24 kHz PCM. Agent er ikke
+implementert, og oppfølgingsvinduet er deaktivert (`follow_up_ms: 0`).
 
 Sett miljøvariabelen `OPPER_API_KEY` for å aktivere transkripsjon med
 NB-Whisper Large via Opper/Berget. Ved lokal debugging kan nøkkelen i stedet
@@ -46,6 +45,34 @@ appsettings-filene.
 Etter VAD sendes hele ytringen som WAV i en base64-data-URI; Opper støtter
 ikke direkte binærlyd på transkripsjonsendepunktet. Ytringer begrenses til
 60 sekunder og lagres ikke som filer av gatewayen.
+
+### Home Assistant TTS
+
+Angi Home Assistant-adresse, et long-lived access token og entity-ID for den
+eksisterende TTS-tjenesten i den ignorerte utviklingsfilen:
+
+```json
+{
+  "OPPER_API_KEY": "DIN_OPPER_NOKKEL",
+  "HomeAssistant": {
+    "Url": "http://homeassistant.local:8123",
+    "Token": "DITT_HOME_ASSISTANT_TOKEN",
+    "TtsEntity": "tts.din_tjeneste"
+  }
+}
+```
+
+Opprett token under Home Assistant-profilens **Security**-innstillinger. Adressen
+må være tilgjengelig fra gatewayen og kan ikke inneholde en sti. TTS-entity-ID
+finnes i Home Assistant under utviklerverktøyets tilstander. For containeren
+bruk `HomeAssistant__Url`, `HomeAssistant__Token` og `HomeAssistant__TtsEntity`
+som miljøvariabler. Uten disse fungerer transkripsjon fortsatt, men uten talesvar.
+
+Gatewayen ber Home Assistant om WAV med 24 kHz, mono og 16-bit. Home Assistant
+kan bruke FFmpeg til konvertering hvis TTS-tjenesten trenger det. Fast fil-cache
+er deaktivert for forespørselen; tekst og lyd kan likevel behandles eller
+mellomlagres av Home Assistant og den valgte TTS-leverandøren. Bruk HTTPS eller
+et pålitelig nettverk for å beskytte token og taleinnhold.
 
 Lyd sendes til en ekstern tjeneste. Sjekk personvern- og lagringsvilkår før
 bruk. Transkripsjonen logges ikke som standard; sett `Marvin__LogTranscripts`

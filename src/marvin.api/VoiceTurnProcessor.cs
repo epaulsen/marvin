@@ -8,6 +8,7 @@ internal interface IVoiceTurnProcessor
 
 internal sealed class TranscribingVoiceTurnProcessor(
     IVoiceTranscriber transcriber,
+    IVoiceSynthesizer synthesizer,
     IConfiguration configuration,
     ILogger<TranscribingVoiceTurnProcessor> logger) : IVoiceTurnProcessor
 {
@@ -26,6 +27,9 @@ internal sealed class TranscribingVoiceTurnProcessor(
         else
             logger.LogInformation("Transcription completed");
 
-        return null;
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        return await synthesizer.SynthesizeAsync(text, cancellationToken);
     }
 }

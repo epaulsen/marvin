@@ -87,12 +87,13 @@ public sealed class VoiceGatewayTests
     }
 
     [Fact(Timeout = 10_000)]
-    public async Task CompletedUtteranceIsSentToTranscriber()
+    public async Task CompletedUtteranceIsTranscribedAndSpoken()
     {
         TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var transcriber = new TestTranscriber();
+        var synthesizer = new TestSynthesizer([1, 2, 3, 4]);
         var processor = new TranscribingVoiceTurnProcessor(
-            transcriber, new ConfigurationBuilder().AddInMemoryCollection(
+            transcriber, synthesizer, new ConfigurationBuilder().AddInMemoryCollection(
                 new Dictionary<string, string?> { ["OPPER_API_KEY"] = "test-key" }).Build(),
             NullLogger<TranscribingVoiceTurnProcessor>.Instance);
         await using var factory = CreateFactory(processor);
@@ -104,10 +105,15 @@ public sealed class VoiceGatewayTests
         await AssertTextAsync(socket, """{"type":"phase","value":"listening"}""");
         await SendAudioAsync(socket, new byte[25 * 1024]);
         await AssertTextAsync(socket, """{"type":"phase","value":"thinking"}""");
+        await AssertTextAsync(socket, """{"type":"phase","value":"replying"}""");
+        var (type, response) = await ReceiveAsync(socket);
+        Assert.Equal(WebSocketMessageType.Binary, type);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, response);
         await AssertTextAsync(socket, """{"type":"phase","value":"idle"}""");
         var expected = new byte[26 * 1024];
         expected[0] = 1;
         Assert.Equal(expected, transcriber.LastAudio);
+        Assert.Equal("Hei Marvin", synthesizer.Text);
     }
 
     [Fact(Timeout = 10_000)]
@@ -141,14 +147,69 @@ public sealed class VoiceGatewayTests
         Assert.Equal(expected, handler.Audio);
     }
 
+    [Fact(Timeout = 10_000)]
+    public async Task ConfiguredGatewayReturnsHomeAssistantSpeech()
+    {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
+        var tts = new SpeechHandler();
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration(configuration => configuration.AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["OPPER_API_KEY"] = "test-key",
+                    ["HomeAssistant:Url"] = "http://homeassistant.local:8123",
+                    ["HomeAssistant:Token"] = "test-token",
+                    ["HomeAssistant:TtsEntity"] = "tts.test"
+                }));
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IVoiceActivityDetectorFactory>();
+                services.AddSingleton<IVoiceActivityDetectorFactory, TestDetectorFactory>();
+                services.AddHttpClient<IVoiceTranscriber, OpperTranscriber>()
+                    .ConfigurePrimaryHttpMessageHandler(() => new TranscriptionHandler());
+                services.AddHttpClient<IVoiceSynthesizer, HomeAssistantSynthesizer>()
+                    .ConfigurePrimaryHttpMessageHandler(() => tts);
+            });
+        });
+        using var socket = await ConnectAsync(factory);
+        await AssertTextAsync(socket, """{"type":"hello","audio_out":"pcm","follow_up_ms":0}""");
+        await SendTextAsync(socket, """{"type":"start"}""");
+        await SendTextAsync(socket, """{"type":"wake"}""");
+        await SendAudioAsync(socket, Speech());
+        await AssertTextAsync(socket, """{"type":"phase","value":"listening"}""");
+        await SendAudioAsync(socket, new byte[25 * 1024]);
+        await AssertTextAsync(socket, """{"type":"phase","value":"thinking"}""");
+        await AssertTextAsync(socket, """{"type":"phase","value":"replying"}""");
+        var (type, response) = await ReceiveAsync(socket);
+        Assert.Equal(WebSocketMessageType.Binary, type);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, response);
+        await AssertTextAsync(socket, """{"type":"phase","value":"idle"}""");
+        Assert.Equal("Hei Marvin", tts.Text);
+    }
+
     [Fact]
     public async Task WithoutApiKeyAudioIsNotTranscribed()
     {
         var transcriber = new TestTranscriber();
         var processor = new TranscribingVoiceTurnProcessor(
-            transcriber, new ConfigurationBuilder().Build(), NullLogger<TranscribingVoiceTurnProcessor>.Instance);
+            transcriber, new TestSynthesizer(null), new ConfigurationBuilder().Build(),
+            NullLogger<TranscribingVoiceTurnProcessor>.Instance);
         Assert.Null(await processor.ProcessAsync([0, 0], TestContext.Current.CancellationToken));
         Assert.Null(transcriber.LastAudio);
+    }
+
+    [Fact]
+    public async Task EmptyTranscriptDoesNotTriggerSpeech()
+    {
+        var synthesizer = new TestSynthesizer([1, 2]);
+        var processor = new TranscribingVoiceTurnProcessor(
+            new TestTranscriber("  "), synthesizer,
+            new ConfigurationBuilder().AddInMemoryCollection(
+                new Dictionary<string, string?> { ["OPPER_API_KEY"] = "test-key" }).Build(),
+            NullLogger<TranscribingVoiceTurnProcessor>.Instance);
+        Assert.Null(await processor.ProcessAsync([0, 0], TestContext.Current.CancellationToken));
+        Assert.Null(synthesizer.Text);
     }
 
     [Fact(Timeout = 10_000)]
@@ -333,14 +394,25 @@ public sealed class VoiceGatewayTests
         }
     }
 
-    private sealed class TestTranscriber : IVoiceTranscriber
+    private sealed class TestTranscriber(string text = "Hei Marvin") : IVoiceTranscriber
     {
         public byte[]? LastAudio { get; private set; }
 
         public Task<string> TranscribeAsync(byte[] audio, CancellationToken cancellationToken)
         {
             LastAudio = audio;
-            return Task.FromResult("Hei Marvin");
+            return Task.FromResult(text);
+        }
+    }
+
+    private sealed class TestSynthesizer(byte[]? audio) : IVoiceSynthesizer
+    {
+        public string? Text { get; private set; }
+
+        public Task<byte[]?> SynthesizeAsync(string text, CancellationToken cancellationToken)
+        {
+            Text = text;
+            return Task.FromResult(audio);
         }
     }
 
@@ -358,6 +430,28 @@ public sealed class VoiceGatewayTests
             {
                 Content = new StringContent("""{"text":"Hei Marvin"}""", Encoding.UTF8, "application/json")
             };
+        }
+    }
+
+    private sealed class SpeechHandler : HttpMessageHandler
+    {
+        public string? Text { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+                Text = json.RootElement.GetProperty("message").GetString();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{"path":"/api/tts_proxy/test.wav"}""", Encoding.UTF8, "application/json")
+                };
+            }
+
+            var wav = Convert.FromHexString(
+                "524946462800000057415645666D74201000000001000100C05D000080BB000002001000646174610400000001020304");
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(wav) };
         }
     }
 
