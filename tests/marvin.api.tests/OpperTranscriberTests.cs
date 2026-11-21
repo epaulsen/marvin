@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Marvin.Api;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Marvin.Api.Tests;
@@ -91,7 +92,8 @@ public sealed class OpperTranscriberTests
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["OPPER_API_KEY"] = "test-key" }).Build();
-        return new OpperTranscriber(new HttpClient(handler) { BaseAddress = new Uri("https://api.opper.ai/") }, configuration);
+        return new OpperTranscriber(new HttpClient(handler) { BaseAddress = new Uri("https://api.opper.ai/") },
+            configuration, NullLogger<OpperTranscriber>.Instance);
     }
 
     private sealed class TestHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler

@@ -26,6 +26,44 @@ public sealed class VoiceGatewayTests
         Assert.Equal(status, response.StatusCode);
     }
 
+    [Fact]
+    public void DevelopmentSettingsAreLoadedAndEnvironmentOverridesThem()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"marvin-config-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var baseFile = Path.Combine(directory, "appsettings.json");
+        var developmentFile = Path.Combine(directory, "appsettings.Development.json");
+        const string variable = "MarvinConfigTest__EnvOverride";
+        var previousValue = Environment.GetEnvironmentVariable(variable);
+        try
+        {
+            File.WriteAllText(baseFile, """{"MarvinConfigTest":{"BaseOnly":"base","Override":"base","EnvOverride":"base"}}""");
+            File.WriteAllText(developmentFile, """{"MarvinConfigTest":{"Override":"development","EnvOverride":"development"}}""");
+            Environment.SetEnvironmentVariable(variable, "environment");
+            using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            {
+                builder.UseContentRoot(directory);
+                builder.UseEnvironment("Development");
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IVoiceActivityDetectorFactory>();
+                    services.AddSingleton<IVoiceActivityDetectorFactory, TestDetectorFactory>();
+                });
+            });
+            var configuration = factory.Services.GetRequiredService<IConfiguration>();
+            Assert.Equal("base", configuration["MarvinConfigTest:BaseOnly"]);
+            Assert.Equal("development", configuration["MarvinConfigTest:Override"]);
+            Assert.Equal("environment", configuration["MarvinConfigTest:EnvOverride"]);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, previousValue);
+            File.Delete(baseFile);
+            File.Delete(developmentFile);
+            Directory.Delete(directory);
+        }
+    }
+
     [Fact(Timeout = 10_000)]
     public async Task WakeSpeechAndSilenceProducePhasesAndReply()
     {

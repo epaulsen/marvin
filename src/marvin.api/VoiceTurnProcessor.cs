@@ -14,8 +14,12 @@ internal sealed class TranscribingVoiceTurnProcessor(
     public async Task<byte[]?> ProcessAsync(byte[] audio, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(configuration["OPPER_API_KEY"]))
+        {
+            logger.LogWarning("Skipping transcription: OPPER_API_KEY is not configured");
             return null;
+        }
 
+        logger.LogDebug("Starting transcription for {AudioBytes} PCM bytes", audio.Length);
         var text = await transcriber.TranscribeAsync(audio, cancellationToken);
         if (configuration.GetValue<bool>("Marvin:LogTranscripts"))
             logger.LogInformation("Transcript: {Transcript}", text);

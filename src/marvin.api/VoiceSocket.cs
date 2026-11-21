@@ -15,13 +15,18 @@ internal sealed class VoiceSocket(
 
     public async Task ReceiveAsync(HttpContext context)
     {
+        using var scope = logger.BeginScope("Voice connection {VoiceConnectionId}", context.TraceIdentifier);
+        logger.LogInformation("Voice endpoint requested; WebSocket upgrade: {IsWebSocket}",
+            context.WebSockets.IsWebSocketRequest);
         if (!context.WebSockets.IsWebSocketRequest)
         {
+            logger.LogWarning("Rejecting request without WebSocket upgrade");
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             return;
         }
 
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
+        logger.LogInformation("Voice WebSocket connected");
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
         using var audio = new MemoryStream();
         var detector = detectorFactory.Create();
@@ -33,6 +38,8 @@ internal sealed class VoiceSocket(
         var started = false;
         var active = false;
         var speech = false;
+        long receivedAudioBytes = 0;
+        long nextAudioLog = 0;
         CancellationTokenSource? turnCancellation = null;
         Task<byte[]?>? turn = null;
         Task? playback = null;
@@ -44,11 +51,15 @@ internal sealed class VoiceSocket(
             windowBytes = 0;
             silence = 0;
             speech = false;
+            receivedAudioBytes = 0;
+            nextAudioLog = 0;
             detector.Reset();
         }
 
         async Task CancelTurnAsync()
         {
+            if (turn is not null || playback is not null)
+                logger.LogDebug("Cancelling active voice processing or playback");
             turnCancellation?.Cancel();
             if (turn is not null)
             {
@@ -74,6 +85,7 @@ internal sealed class VoiceSocket(
         try
         {
             await SendTextAsync(socket, """{"type":"hello","audio_out":"pcm","follow_up_ms":0}""", lifetime.Token);
+            logger.LogDebug("Sent hello: PCM output, follow-up disabled");
 
             while (socket.State == WebSocketState.Open)
             {
@@ -87,6 +99,7 @@ internal sealed class VoiceSocket(
                     try
                     {
                         var response = await turn;
+                        logger.LogDebug("Voice processing completed; response audio bytes: {AudioBytes}", response?.Length ?? 0);
                         if (response is { Length: > 0 })
                         {
                             await SendPhaseAsync(socket, "replying", lifetime.Token);
@@ -95,11 +108,13 @@ internal sealed class VoiceSocket(
                     }
                     catch (OperationCanceledException) when (turnCancellation!.IsCancellationRequested)
                     {
+                        logger.LogDebug("Voice processing cancelled");
                     }
                     catch (Exception ex)
                     {
                         logger.LogError(ex, "Voice turn failed");
                         await SendTextAsync(socket, """{"type":"error"}""", lifetime.Token);
+                        logger.LogDebug("Sent error to Voice PE");
                     }
                     turn = null;
                     if (playback is not null)
@@ -113,6 +128,7 @@ internal sealed class VoiceSocket(
                 if (!receive.IsCompleted && playback is { IsCompleted: true })
                 {
                     await playback;
+                    logger.LogDebug("Audio playback completed");
                     playback = null;
                     turnCancellation?.Dispose();
                     turnCancellation = null;
@@ -124,6 +140,7 @@ internal sealed class VoiceSocket(
                 receive = null;
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
+                    logger.LogInformation("Voice PE requested WebSocket close: {CloseStatus}", socket.CloseStatus);
                     await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, lifetime.Token);
                     break;
                 }
@@ -132,6 +149,7 @@ internal sealed class VoiceSocket(
                 {
                     if (control.Length + result.Count > WindowBytes)
                     {
+                        logger.LogWarning("Rejecting oversized control message");
                         await socket.CloseOutputAsync(WebSocketCloseStatus.MessageTooBig, "Control message too large.", lifetime.Token);
                         break;
                     }
@@ -144,23 +162,29 @@ internal sealed class VoiceSocket(
                     switch (command)
                     {
                         case "start" when !started:
+                            logger.LogDebug("Received start");
                             started = true;
                             break;
                         case "wake" when started:
+                            logger.LogDebug("Received wake");
                             await CancelTurnAsync();
                             active = true;
                             break;
                         case "flush" when started:
+                            logger.LogDebug("Received flush");
                             await CancelTurnAsync();
                             break;
                         case "interrupt" when started:
+                            logger.LogDebug("Received interrupt");
                             await CancelTurnAsync();
                             active = false;
                             await SendPhaseAsync(socket, "idle", lifetime.Token);
                             break;
                         case "ping" when started:
+                            logger.LogDebug("Received ping");
                             break;
                         default:
+                            logger.LogWarning("Rejecting malformed or unexpected control message; started: {Started}", started);
                             await socket.CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, "Unexpected control message.", lifetime.Token);
                             return;
                     }
@@ -169,12 +193,19 @@ internal sealed class VoiceSocket(
 
                 if (!started || !active)
                 {
+                    logger.LogWarning("Rejecting audio before start and wake; started: {Started}, active: {Active}", started, active);
                     await socket.CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, "Expected wake before audio.", lifetime.Token);
                     break;
                 }
                 if (turn is not null || playback is not null)
                     continue;
 
+                receivedAudioBytes += result.Count;
+                if (receivedAudioBytes >= nextAudioLog)
+                {
+                    logger.LogDebug("Receiving PCM audio; bytes received in current turn: {AudioBytes}", receivedAudioBytes);
+                    nextAudioLog = receivedAudioBytes + 160_000;
+                }
                 var offset = 0;
                 while (offset < result.Count)
                 {
@@ -188,6 +219,7 @@ internal sealed class VoiceSocket(
 
                     if (audio.Length + WindowBytes > MaxAudioBytes)
                     {
+                        logger.LogWarning("Rejecting audio exceeding the 60-second limit");
                         await socket.CloseOutputAsync(WebSocketCloseStatus.MessageTooBig, "Audio limit exceeded.", lifetime.Token);
                         return;
                     }
@@ -199,11 +231,13 @@ internal sealed class VoiceSocket(
                         if (!speech)
                         {
                             speech = true;
+                            logger.LogDebug("VAD detected speech; probability: {Probability:F3}", probability);
                             await SendPhaseAsync(socket, "listening", lifetime.Token);
                         }
                     }
                     else if (speech && probability < 0.35f && ++silence >= SilenceWindows)
                     {
+                        logger.LogDebug("VAD detected end of speech after {SilenceWindows} silence windows", silence);
                         var utterance = audio.ToArray();
                         logger.LogInformation("Received utterance with {AudioBytes} audio bytes", utterance.Length);
                         ResetAudio();
@@ -217,20 +251,22 @@ internal sealed class VoiceSocket(
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
         {
+            logger.LogDebug("Voice connection cancelled");
         }
-        catch (WebSocketException)
+        catch (WebSocketException ex)
         {
-            logger.LogDebug("Voice WebSocket disconnected");
+            logger.LogDebug(ex, "Voice WebSocket disconnected");
         }
-        catch (IOException)
+        catch (IOException ex)
         {
-            logger.LogDebug("Voice WebSocket disconnected");
+            logger.LogDebug(ex, "Voice WebSocket disconnected");
         }
         finally
         {
             lifetime.Cancel();
             await CancelTurnAsync();
             control.Dispose();
+            logger.LogInformation("Voice WebSocket session ended");
         }
     }
 
@@ -249,8 +285,11 @@ internal sealed class VoiceSocket(
         }
     }
 
-    private static Task SendPhaseAsync(WebSocket socket, string phase, CancellationToken cancellationToken) =>
-        SendTextAsync(socket, $$"""{"type":"phase","value":"{{phase}}"}""", cancellationToken);
+    private async Task SendPhaseAsync(WebSocket socket, string phase, CancellationToken cancellationToken)
+    {
+        await SendTextAsync(socket, $$"""{"type":"phase","value":"{{phase}}"}""", cancellationToken);
+        logger.LogDebug("Sent phase: {Phase}", phase);
+    }
 
     private static async Task SendAudioAsync(WebSocket socket, byte[] audio, CancellationToken cancellationToken)
     {

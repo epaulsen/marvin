@@ -98,6 +98,7 @@ Gateway returnerer JSON
 
 - Legge til agent som konsumerer JSON-resultatet.
 - Integrere MCP-verktøy for Home Assistant, Entur og eventuelle andre tjenester.
+- Bruke den eksisterende TTS-tjenesten i Home Assistant til å gjøre agentsvar om til tale. Gatewayen henter lyden og sender den til Voice PE som 24 kHz, 16-bit mono PCM.
 - Beholde taleinngang og agent som separate komponenter.
 
 ## Første leveranses akseptansekriterier
@@ -119,4 +120,5 @@ Grovt anslag for første leveranse med taleridentifikasjon: **4–7 utviklerdage
 - Bruk Python-container for SpeechBrain-modellen.
 - Hold Otter- og talerkall parallelle.
 - Ikke bygg agent/MCP-integrasjoner inn i første leveranse.
+- Bruk Home Assistants konfigurerte TTS-tjeneste til framtidige talesvar.
 - Behandle stemmeprofiler som sensitive data: begrens tilgang, lagre lokalt og støtt sletting.

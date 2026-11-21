@@ -9,7 +9,10 @@ internal interface IVoiceTranscriber
     Task<string> TranscribeAsync(byte[] audio, CancellationToken cancellationToken);
 }
 
-internal sealed class OpperTranscriber(HttpClient client, IConfiguration configuration) : IVoiceTranscriber
+internal sealed class OpperTranscriber(
+    HttpClient client,
+    IConfiguration configuration,
+    ILogger<OpperTranscriber> logger) : IVoiceTranscriber
 {
     private const string Model = "berget/NbAiLab/nb-whisper-large";
 
@@ -27,7 +30,9 @@ internal sealed class OpperTranscriber(HttpClient client, IConfiguration configu
             audio = "data:audio/wav;base64," + Convert.ToBase64String(wav),
             language = "no"
         });
+        logger.LogDebug("Sending transcription request to Opper; model: {Model}, WAV bytes: {AudioBytes}", Model, wav.Length);
         using var response = await client.SendAsync(request, cancellationToken);
+        logger.LogDebug("Opper transcription response status: {StatusCode}", (int)response.StatusCode);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<TranscriptionResponse>(cancellationToken);
         return result?.Text ?? throw new InvalidDataException("Opper returned a transcription without text.");
