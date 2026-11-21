@@ -1,0 +1,27 @@
+services:
+  marvin:
+    image: ${MARVIN_IMAGE:-epaulsen/marvin:latest}
+    restart: unless-stopped
+    ports:
+      - "${MARVIN_HOST_IP:-0.0.0.0}:${MARVIN_HOST_PORT:-5678}:${MARVIN_CONTAINER_PORT:-8080}"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      Kestrel__Endpoints__Http__Url: "http://0.0.0.0:${MARVIN_CONTAINER_PORT:-8080}"
+      OPPER_API_KEY: ${OPPER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OpenAI__Model: ${OPENAI_MODEL:-gpt-6-luna}
+      HomeAssistant__Url: ${HOME_ASSISTANT_URL:-}
+      HomeAssistant__Token: ${HOME_ASSISTANT_TOKEN:-}
+      HomeAssistant__TtsEntity: ${HOME_ASSISTANT_TTS_ENTITY:-}
+      HomeAssistant__McpEnabled: ${HOME_ASSISTANT_MCP_ENABLED:-false}
+      Marvin__LogTranscripts: ${MARVIN_LOG_TRANSCRIPTS:-false}
+      Logging__LogLevel__Default: ${LOG_LEVEL_DEFAULT:-Information}
+      Logging__LogLevel__Marvin.Api: ${LOG_LEVEL_MARVIN:-Debug}
+      Logging__LogLevel__Microsoft.AspNetCore: ${LOG_LEVEL_ASPNETCORE:-Warning}
+      Logging__Console__IncludeScopes: ${LOG_INCLUDE_SCOPES:-true}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:${MARVIN_CONTAINER_PORT:-8080}/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

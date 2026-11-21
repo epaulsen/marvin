@@ -17,6 +17,26 @@ docker build -t marvin-api .
 docker run --rm -p 8080:8080 -e OPPER_API_KEY marvin-api
 ```
 
+For serverinstallasjon med Docker Hub-imaget, kopier
+`samples/.env.example` til `samples/.env`, fyll inn verdiene og kjør:
+
+```sh
+cd samples
+docker compose pull
+docker compose up -d
+```
+
+Porten er `5678` som standard. Etter en ny publisering kjører du de samme to
+compose-kommandoene for å laste ned imaget og opprette containeren på nytt.
+Begrens tilgang til `.env`, som inneholder API-nøkler, og sørg for at Home
+Assistant-adressen kan nås fra containeren.
+
+Når en pull request merges til `main`, bygger GitHub Actions et `linux/amd64`-
+image og publiserer `epaulsen/marvin:latest`. Workflowen krever GitHub Actions-
+secrets `DOCKERHUB_USERNAME` og `DOCKERHUB_TOKEN`, der tokenet har push-tilgang
+til Docker Hub-repositoriet. Legg dem inn under **Settings → Secrets and
+variables → Actions** i GitHub-repositoriet.
+
 `GET /health` er HTTP-probe for k3s. WebSocket-endepunktet `/voice` har foreløpig
 ingen autentisering. Gatewayen lytter på `0.0.0.0:8080`; begrens tilgangen
 til et pålitelig nettverk med brannmur.
