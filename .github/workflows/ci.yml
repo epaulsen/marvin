@@ -17,3 +17,16 @@ jobs:
         with:
           dotnet-version: '11.0.x'
       - run: dotnet test --solution marvin.slnx --configuration Release
+      - name: Build and start Alpine image
+        run: |
+          docker build -t marvin-ci .
+          docker run --rm -d --name marvin-ci -p 127.0.0.1:8080:8080 marvin-ci
+          trap 'docker stop marvin-ci >/dev/null 2>&1 || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8080/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs marvin-ci
+          exit 1
