@@ -68,7 +68,8 @@ internal sealed class HomeAssistantToolProvider(IConfiguration configuration, IH
         {
             this.transport = transport;
             this.client = client;
-            tools = available.Where(tool => tool.Name.Length is > 0 and <= 64
+            tools = available.Where(tool => tool.Name != OpenAiVoiceAssistant.AskUserToolName
+                && tool.Name.Length is > 0 and <= 64
                 && tool.Name.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-')
                 && tool.JsonSchema.ValueKind == JsonValueKind.Object)
                 .ToDictionary(tool => tool.Name, StringComparer.Ordinal);

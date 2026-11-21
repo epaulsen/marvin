@@ -41,9 +41,9 @@ public sealed class OpenAiVoiceAssistantTests
             : Result("Lyset er på."));
         var assistant = CreateAssistant(client, new TestToolProvider(toolSession), new TestClock());
 
-        Assert.Equal("Lyset er på.", await assistant.ReplyAsync("Slå på lyset", TestContext.Current.CancellationToken));
+        Assert.Equal("Lyset er på.", (await assistant.ReplyAsync("Slå på lyset", TestContext.Current.CancellationToken)).Text);
         Assert.Equal(("turn_on", """{"name":"Kjøkken"}"""), toolSession.Call);
-        Assert.Single(client.ToolSets[0]);
+        Assert.Equal(2, client.ToolSets[0].Count);
         var toolMessage = Assert.IsType<ToolChatMessage>(client.Requests[1][^1]);
         Assert.Equal("ok", toolMessage.Content[0].Text);
         Assert.True(toolSession.Disposed);
@@ -68,8 +68,45 @@ public sealed class OpenAiVoiceAssistantTests
         var client = new TestChatClient((_, _) => throw new InvalidOperationException());
         var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(), new ConfigurationBuilder().Build(),
             new TestClock(), NullLogger<OpenAiVoiceAssistant>.Instance);
-        Assert.Equal("Hei", await assistant.ReplyAsync("Hei", TestContext.Current.CancellationToken));
+        Assert.Equal(new VoiceAssistantResponse("Hei"), await assistant.ReplyAsync("Hei", TestContext.Current.CancellationToken));
         Assert.Empty(client.Requests);
+    }
+
+    [Fact]
+    public async Task AskUserSpeaksQuestionAndKeepsItInConversationHistory()
+    {
+        var client = new TestChatClient((_, index) => index == 0
+            ? ToolResult("ask_user", """{"question":"Hvilket rom?"}""")
+            : Result("Lyset på kjøkkenet er på."));
+        var assistant = CreateAssistant(client, new TestToolProvider(), new TestClock());
+
+        var question = await assistant.ReplyAsync("Slå på lyset", TestContext.Current.CancellationToken);
+        Assert.Equal(new VoiceAssistantResponse("Hvilket rom?", true), question);
+        Assert.Single(client.ToolSets[0]);
+        Assert.Single(client.Requests);
+
+        var reply = await assistant.ReplyAsync("Kjøkkenet", TestContext.Current.CancellationToken);
+        Assert.Equal(new VoiceAssistantResponse("Lyset på kjøkkenet er på."), reply);
+        Assert.Equal("Hvilket rom?", Assert.IsType<AssistantChatMessage>(client.Requests[1][2]).Content[0].Text);
+        Assert.Equal("Kjøkkenet", Assert.IsType<UserChatMessage>(client.Requests[1][3]).Content[0].Text);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("""{"question":"  "}""")]
+    [InlineData("""{"question":42}""")]
+    [InlineData("invalid json")]
+    public async Task InvalidClarificationDoesNotEnterHistory(string arguments)
+    {
+        var client = new TestChatClient((_, index) => index == 0
+            ? ToolResult("ask_user", arguments)
+            : Result("Svar"));
+        var assistant = CreateAssistant(client, new TestToolProvider(), new TestClock());
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            assistant.ReplyAsync("Spørsmål", TestContext.Current.CancellationToken));
+        await assistant.ReplyAsync("Neste", TestContext.Current.CancellationToken);
+        Assert.Equal(2, client.Requests[1].Count);
     }
 
     [Fact]

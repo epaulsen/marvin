@@ -53,8 +53,10 @@ igjen. Stillhet mens enheten er inaktiv lukker ikke forbindelsen.
 Silero VAD identifiserer tale lokalt og avslutter en ytring etter 800 ms stillhet.
 Gatewayen sender fasene `listening`, `thinking`, `replying` og `idle`. Med
 OpenAI og TTS konfigurert sendes transkripsjonen til agenten, og svaret spilles
-av som 24 kHz PCM. Oppfølgingsvinduet er deaktivert (`follow_up_ms: 0`), så
-neste ytring krever ny aktivering.
+av som 24 kHz PCM. Automatisk lytting etter alle svar er deaktivert
+(`follow_up_ms: 0`). Når agenten trenger en avklaring, kan den i stedet bruke
+`ask_user`: spørsmålet leses opp, og en kompatibel Voice PE-firmware åpner et
+kort oppfølgingsvindu uten vekkeord. Hvis ingen svarer, lukkes mikrofonen.
 
 Sett miljøvariabelen `OPPER_API_KEY` for å aktivere transkripsjon med
 NB-Whisper Large via Opper/Berget. Ved lokal debugging kan nøkkelen i stedet

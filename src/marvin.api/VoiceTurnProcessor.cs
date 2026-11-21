@@ -3,8 +3,10 @@ namespace Marvin.Api;
 internal interface IVoiceTurnProcessor
 {
     // The response, if present, must be 24 kHz mono PCM16 little-endian.
-    Task<byte[]?> ProcessAsync(byte[] audio, CancellationToken cancellationToken);
+    Task<VoiceTurnResponse?> ProcessAsync(byte[] audio, CancellationToken cancellationToken);
 }
+
+internal sealed record VoiceTurnResponse(byte[] Audio, bool RequestFollowUp = false);
 
 internal sealed class TranscribingVoiceTurnProcessor(
     IVoiceTranscriber transcriber,
@@ -13,7 +15,7 @@ internal sealed class TranscribingVoiceTurnProcessor(
     IConfiguration configuration,
     ILogger<TranscribingVoiceTurnProcessor> logger) : IVoiceTurnProcessor
 {
-    public async Task<byte[]?> ProcessAsync(byte[] audio, CancellationToken cancellationToken)
+    public async Task<VoiceTurnResponse?> ProcessAsync(byte[] audio, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(configuration["OPPER_API_KEY"]))
         {
@@ -32,6 +34,7 @@ internal sealed class TranscribingVoiceTurnProcessor(
             return null;
 
         var reply = await assistant.ReplyAsync(text, cancellationToken);
-        return await synthesizer.SynthesizeAsync(reply, cancellationToken);
+        var speech = await synthesizer.SynthesizeAsync(reply.Text, cancellationToken);
+        return speech is { Length: > 0 } ? new VoiceTurnResponse(speech, reply.RequestFollowUp) : null;
     }
 }
