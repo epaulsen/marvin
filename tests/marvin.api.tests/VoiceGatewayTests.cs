@@ -120,6 +120,71 @@ public sealed class VoiceGatewayTests
     }
 
     [Fact(Timeout = 10_000)]
+    public async Task ClarificationRequestsFollowUpAndAcceptsSpeechWithoutWake()
+    {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
+        var chat = new FollowUpChatCompletionClient();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["OPENAI_API_KEY"] = "test-key",
+            ["OPPER_API_KEY"] = "test-key"
+        }).Build();
+        var assistant = new OpenAiVoiceAssistant(chat, new DisabledToolProvider(), configuration,
+            TimeProvider.System, NullLogger<OpenAiVoiceAssistant>.Instance);
+        var synthesizer = new TestSynthesizer([1, 2, 3, 4]);
+        var processor = new TranscribingVoiceTurnProcessor(new TestTranscriber(), synthesizer, assistant,
+            configuration, NullLogger<TranscribingVoiceTurnProcessor>.Instance);
+        await using var factory = CreateFactory(processor);
+        using var socket = await ConnectAsync(factory);
+        await AssertTextAsync(socket, """{"type":"hello","audio_out":"pcm","follow_up_ms":0}""");
+        await SendTextAsync(socket, """{"type":"start"}""");
+        await SendTextAsync(socket, """{"type":"wake"}""");
+        await SendAudioAsync(socket, Speech());
+        await AssertTextAsync(socket, """{"type":"phase","value":"listening"}""");
+        await SendAudioAsync(socket, new byte[25 * 1024]);
+        await AssertTextAsync(socket, """{"type":"phase","value":"thinking"}""");
+        await AssertTextAsync(socket, """{"type":"phase","value":"replying"}""");
+        var (type, response) = await ReceiveAsync(socket);
+        Assert.Equal(WebSocketMessageType.Binary, type);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, response);
+        await AssertTextAsync(socket, """{"type":"phase","value":"idle"}""");
+        await AssertTextAsync(socket, """{"type":"request_follow_up"}""");
+        Assert.Equal("Hvilket rom?", synthesizer.Text);
+
+        await SendAudioAsync(socket, Speech());
+        await AssertTextAsync(socket, """{"type":"phase","value":"listening"}""");
+        await SendAudioAsync(socket, new byte[25 * 1024]);
+        await AssertTextAsync(socket, """{"type":"phase","value":"thinking"}""");
+        await AssertTextAsync(socket, """{"type":"phase","value":"replying"}""");
+        Assert.Equal(WebSocketMessageType.Binary, (await ReceiveAsync(socket)).Type);
+        await AssertTextAsync(socket, """{"type":"phase","value":"idle"}""");
+        Assert.Equal("Ferdig.", synthesizer.Text);
+        Assert.Equal("Hvilket rom?", Assert.IsType<AssistantChatMessage>(chat.Requests[1][2]).Content[0].Text);
+    }
+
+    [Fact(Timeout = 10_000)]
+    public async Task InterruptDuringClarificationDoesNotRequestFollowUp()
+    {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
+        await using var factory = CreateFactory(new TestProcessor(new byte[480_000], requestFollowUp: true));
+        using var socket = await ConnectAsync(factory);
+        await AssertTextAsync(socket, """{"type":"hello","audio_out":"pcm","follow_up_ms":0}""");
+        await SendTextAsync(socket, """{"type":"start"}""");
+        await SendTextAsync(socket, """{"type":"wake"}""");
+        await SendAudioAsync(socket, Speech());
+        await AssertTextAsync(socket, """{"type":"phase","value":"listening"}""");
+        await SendAudioAsync(socket, new byte[25 * 1024]);
+        await AssertTextAsync(socket, """{"type":"phase","value":"thinking"}""");
+        await AssertTextAsync(socket, """{"type":"phase","value":"replying"}""");
+        Assert.Equal(WebSocketMessageType.Binary, (await ReceiveAsync(socket)).Type);
+        await SendTextAsync(socket, """{"type":"interrupt"}""");
+        await AssertTextAsync(socket, """{"type":"phase","value":"idle"}""");
+        await SendTextAsync(socket, """{"type":"wake"}""");
+        await SendAudioAsync(socket, Speech());
+        await AssertTextAsync(socket, """{"type":"phase","value":"listening"}""");
+    }
+
+    [Fact(Timeout = 10_000)]
     public async Task ConfiguredGatewaySendsCompletedUtteranceToOpper()
     {
         TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
@@ -216,6 +281,24 @@ public sealed class VoiceGatewayTests
             NullLogger<TranscribingVoiceTurnProcessor>.Instance);
         Assert.Null(await processor.ProcessAsync([0, 0], TestContext.Current.CancellationToken));
         Assert.Null(synthesizer.Text);
+    }
+
+    [Fact]
+    public async Task ClarificationFlagIsPreservedOnlyWhenSpeechIsAvailable()
+    {
+        var assistant = new TestAssistant("Hvilket rom?", requestFollowUp: true);
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["OPPER_API_KEY"] = "test-key" }).Build();
+        var processor = new TranscribingVoiceTurnProcessor(new TestTranscriber(), new TestSynthesizer([1, 2]),
+            assistant, configuration, NullLogger<TranscribingVoiceTurnProcessor>.Instance);
+        var response = await processor.ProcessAsync([0, 0], TestContext.Current.CancellationToken);
+        Assert.NotNull(response);
+        Assert.Equal(new byte[] { 1, 2 }, response.Audio);
+        Assert.True(response.RequestFollowUp);
+
+        var withoutSpeech = new TranscribingVoiceTurnProcessor(new TestTranscriber(), new TestSynthesizer(null),
+            assistant, configuration, NullLogger<TranscribingVoiceTurnProcessor>.Instance);
+        Assert.Null(await withoutSpeech.ProcessAsync([0, 0], TestContext.Current.CancellationToken));
     }
 
     [Fact(Timeout = 10_000)]
@@ -390,13 +473,13 @@ public sealed class VoiceGatewayTests
         public void Reset() { }
     }
 
-    private sealed class TestProcessor(byte[]? response) : IVoiceTurnProcessor
+    private sealed class TestProcessor(byte[]? response, bool requestFollowUp = false) : IVoiceTurnProcessor
     {
         public byte[]? LastAudio { get; private set; }
-        public Task<byte[]?> ProcessAsync(byte[] audio, CancellationToken cancellationToken)
+        public Task<VoiceTurnResponse?> ProcessAsync(byte[] audio, CancellationToken cancellationToken)
         {
             LastAudio = audio;
-            return Task.FromResult(response);
+            return Task.FromResult(response is null ? null : new VoiceTurnResponse(response, requestFollowUp));
         }
     }
 
@@ -422,14 +505,14 @@ public sealed class VoiceGatewayTests
         }
     }
 
-    private sealed class TestAssistant(string reply) : IVoiceAssistant
+    private sealed class TestAssistant(string reply, bool requestFollowUp = false) : IVoiceAssistant
     {
         public string? Text { get; private set; }
 
-        public Task<string> ReplyAsync(string text, CancellationToken cancellationToken)
+        public Task<VoiceAssistantResponse> ReplyAsync(string text, CancellationToken cancellationToken)
         {
             Text = text;
-            return Task.FromResult(reply);
+            return Task.FromResult(new VoiceAssistantResponse(reply, requestFollowUp));
         }
     }
 
@@ -440,6 +523,32 @@ public sealed class VoiceGatewayTests
             CancellationToken cancellationToken) =>
             Task.FromResult(OpenAIChatModelFactory.ChatCompletion(finishReason: ChatFinishReason.Stop,
                 content: new ChatMessageContent("Hei tilbake"), role: ChatMessageRole.Assistant));
+#pragma warning restore OPENAI001
+    }
+
+    private sealed class DisabledToolProvider : IAgentToolProvider
+    {
+        public Task<IAgentToolSession?> OpenAsync(CancellationToken cancellationToken) =>
+            Task.FromResult<IAgentToolSession?>(null);
+    }
+
+    private sealed class FollowUpChatCompletionClient : IChatCompletionClient
+    {
+        public List<IReadOnlyList<ChatMessage>> Requests { get; } = [];
+
+#pragma warning disable OPENAI001
+        public Task<ChatCompletion> CompleteAsync(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatTool> tools,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add(messages.ToArray());
+            return Task.FromResult(Requests.Count == 1
+                ? OpenAIChatModelFactory.ChatCompletion(finishReason: ChatFinishReason.ToolCalls,
+                    content: new ChatMessageContent(), role: ChatMessageRole.Assistant,
+                    toolCalls: [ChatToolCall.CreateFunctionToolCall("call-1", "ask_user",
+                        BinaryData.FromString("""{"question":"Hvilket rom?"}"""))])
+                : OpenAIChatModelFactory.ChatCompletion(finishReason: ChatFinishReason.Stop,
+                    content: new ChatMessageContent("Ferdig."), role: ChatMessageRole.Assistant));
+        }
 #pragma warning restore OPENAI001
     }
 
@@ -486,7 +595,7 @@ public sealed class VoiceGatewayTests
     {
         public TaskCompletionSource Cancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public async Task<byte[]?> ProcessAsync(byte[] audio, CancellationToken cancellationToken)
+        public async Task<VoiceTurnResponse?> ProcessAsync(byte[] audio, CancellationToken cancellationToken)
         {
             try
             {

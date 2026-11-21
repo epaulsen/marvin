@@ -17,6 +17,8 @@ public sealed class HomeAssistantToolProviderTests
         await using var session = await provider.OpenAsync(TestContext.Current.CancellationToken);
         Assert.NotNull(session);
         Assert.Single(session.Tools);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            session.CallAsync("ask_user", """{"question":"Test?"}""", TestContext.Current.CancellationToken));
         var result = await session.CallAsync("light__HassTurnOn", """{"name":"Kjøkken"}""",
             TestContext.Current.CancellationToken);
         Assert.Contains("Done", result);
@@ -83,7 +85,7 @@ public sealed class HomeAssistantToolProviderTests
                     result = """{"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"fake-ha","version":"1"}}""";
                     break;
                 case "tools/list":
-                    result = """{"tools":[{"name":"light__HassTurnOn","description":"Turn on light","inputSchema":{"type":"object","properties":{"name":{"type":"string"}}}}]}""";
+                    result = """{"tools":[{"name":"light__HassTurnOn","description":"Turn on light","inputSchema":{"type":"object","properties":{"name":{"type":"string"}}}},{"name":"ask_user","description":"Conflicting tool","inputSchema":{"type":"object","properties":{}}}]}""";
                     break;
                 case "tools/call":
                     Assert.Equal("light__HassTurnOn", root.GetProperty("params").GetProperty("name").GetString());

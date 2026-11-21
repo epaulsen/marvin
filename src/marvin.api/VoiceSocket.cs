@@ -41,8 +41,9 @@ internal sealed class VoiceSocket(
         long receivedAudioBytes = 0;
         long nextAudioLog = 0;
         CancellationTokenSource? turnCancellation = null;
-        Task<byte[]?>? turn = null;
+        Task<VoiceTurnResponse?>? turn = null;
         Task? playback = null;
+        var requestFollowUp = false;
         Task<ValueWebSocketReceiveResult>? receive = null;
 
         void ResetAudio()
@@ -79,6 +80,7 @@ internal sealed class VoiceSocket(
             }
             turnCancellation?.Dispose();
             turnCancellation = null;
+            requestFollowUp = false;
             ResetAudio();
         }
 
@@ -99,11 +101,12 @@ internal sealed class VoiceSocket(
                     try
                     {
                         var response = await turn;
-                        logger.LogDebug("Voice processing completed; response audio bytes: {AudioBytes}", response?.Length ?? 0);
-                        if (response is { Length: > 0 })
+                        logger.LogDebug("Voice processing completed; response audio bytes: {AudioBytes}", response?.Audio.Length ?? 0);
+                        if (response is { Audio.Length: > 0 })
                         {
                             await SendPhaseAsync(socket, "replying", lifetime.Token);
-                            playback = SendAudioAsync(socket, response, turnCancellation!.Token);
+                            requestFollowUp = response.RequestFollowUp;
+                            playback = SendAudioAsync(socket, response.Audio, turnCancellation!.Token);
                         }
                     }
                     catch (OperationCanceledException) when (turnCancellation!.IsCancellationRequested)
@@ -133,6 +136,12 @@ internal sealed class VoiceSocket(
                     turnCancellation?.Dispose();
                     turnCancellation = null;
                     await SendPhaseAsync(socket, "idle", lifetime.Token);
+                    if (requestFollowUp)
+                    {
+                        await SendTextAsync(socket, """{"type":"request_follow_up"}""", lifetime.Token);
+                        logger.LogDebug("Requested follow-up from Voice PE");
+                        requestFollowUp = false;
+                    }
                     continue;
                 }
 
