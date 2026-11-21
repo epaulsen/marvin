@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using OpenAI.Chat;
 using Xunit;
 
 namespace Marvin.Api.Tests;
@@ -92,8 +93,9 @@ public sealed class VoiceGatewayTests
         TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var transcriber = new TestTranscriber();
         var synthesizer = new TestSynthesizer([1, 2, 3, 4]);
+        var assistant = new TestAssistant("Hei tilbake");
         var processor = new TranscribingVoiceTurnProcessor(
-            transcriber, synthesizer, new ConfigurationBuilder().AddInMemoryCollection(
+            transcriber, synthesizer, assistant, new ConfigurationBuilder().AddInMemoryCollection(
                 new Dictionary<string, string?> { ["OPPER_API_KEY"] = "test-key" }).Build(),
             NullLogger<TranscribingVoiceTurnProcessor>.Instance);
         await using var factory = CreateFactory(processor);
@@ -113,7 +115,8 @@ public sealed class VoiceGatewayTests
         var expected = new byte[26 * 1024];
         expected[0] = 1;
         Assert.Equal(expected, transcriber.LastAudio);
-        Assert.Equal("Hei Marvin", synthesizer.Text);
+        Assert.Equal("Hei Marvin", assistant.Text);
+        Assert.Equal("Hei tilbake", synthesizer.Text);
     }
 
     [Fact(Timeout = 10_000)]
@@ -158,6 +161,7 @@ public sealed class VoiceGatewayTests
                 new Dictionary<string, string?>
                 {
                     ["OPPER_API_KEY"] = "test-key",
+                    ["OPENAI_API_KEY"] = "test-key",
                     ["HomeAssistant:Url"] = "http://homeassistant.local:8123",
                     ["HomeAssistant:Token"] = "test-token",
                     ["HomeAssistant:TtsEntity"] = "tts.test"
@@ -170,6 +174,8 @@ public sealed class VoiceGatewayTests
                     .ConfigurePrimaryHttpMessageHandler(() => new TranscriptionHandler());
                 services.AddHttpClient<IVoiceSynthesizer, HomeAssistantSynthesizer>()
                     .ConfigurePrimaryHttpMessageHandler(() => tts);
+                services.RemoveAll<IChatCompletionClient>();
+                services.AddSingleton<IChatCompletionClient, TestChatCompletionClient>();
             });
         });
         using var socket = await ConnectAsync(factory);
@@ -185,7 +191,7 @@ public sealed class VoiceGatewayTests
         Assert.Equal(WebSocketMessageType.Binary, type);
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, response);
         await AssertTextAsync(socket, """{"type":"phase","value":"idle"}""");
-        Assert.Equal("Hei Marvin", tts.Text);
+        Assert.Equal("Hei tilbake", tts.Text);
     }
 
     [Fact]
@@ -193,7 +199,7 @@ public sealed class VoiceGatewayTests
     {
         var transcriber = new TestTranscriber();
         var processor = new TranscribingVoiceTurnProcessor(
-            transcriber, new TestSynthesizer(null), new ConfigurationBuilder().Build(),
+            transcriber, new TestSynthesizer(null), new TestAssistant("unused"), new ConfigurationBuilder().Build(),
             NullLogger<TranscribingVoiceTurnProcessor>.Instance);
         Assert.Null(await processor.ProcessAsync([0, 0], TestContext.Current.CancellationToken));
         Assert.Null(transcriber.LastAudio);
@@ -204,7 +210,7 @@ public sealed class VoiceGatewayTests
     {
         var synthesizer = new TestSynthesizer([1, 2]);
         var processor = new TranscribingVoiceTurnProcessor(
-            new TestTranscriber("  "), synthesizer,
+            new TestTranscriber("  "), synthesizer, new TestAssistant("unused"),
             new ConfigurationBuilder().AddInMemoryCollection(
                 new Dictionary<string, string?> { ["OPPER_API_KEY"] = "test-key" }).Build(),
             NullLogger<TranscribingVoiceTurnProcessor>.Instance);
@@ -414,6 +420,27 @@ public sealed class VoiceGatewayTests
             Text = text;
             return Task.FromResult(audio);
         }
+    }
+
+    private sealed class TestAssistant(string reply) : IVoiceAssistant
+    {
+        public string? Text { get; private set; }
+
+        public Task<string> ReplyAsync(string text, CancellationToken cancellationToken)
+        {
+            Text = text;
+            return Task.FromResult(reply);
+        }
+    }
+
+    private sealed class TestChatCompletionClient : IChatCompletionClient
+    {
+#pragma warning disable OPENAI001
+        public Task<ChatCompletion> CompleteAsync(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatTool> tools,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(OpenAIChatModelFactory.ChatCompletion(finishReason: ChatFinishReason.Stop,
+                content: new ChatMessageContent("Hei tilbake"), role: ChatMessageRole.Assistant));
+#pragma warning restore OPENAI001
     }
 
     private sealed class TranscriptionHandler : HttpMessageHandler

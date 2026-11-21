@@ -29,9 +29,10 @@ forkaster ufullstendig lyd. Etter avsluttet svar kan samme forbindelse brukes
 igjen. Stillhet mens enheten er inaktiv lukker ikke forbindelsen.
 
 Silero VAD identifiserer tale lokalt og avslutter en ytring etter 800 ms stillhet.
-Gatewayen sender fasene `listening`, `thinking`, `replying` og `idle`. Med TTS
-konfigurert leses transkripsjonen tilbake som 24 kHz PCM. Agent er ikke
-implementert, og oppfølgingsvinduet er deaktivert (`follow_up_ms: 0`).
+Gatewayen sender fasene `listening`, `thinking`, `replying` og `idle`. Med
+OpenAI og TTS konfigurert sendes transkripsjonen til agenten, og svaret spilles
+av som 24 kHz PCM. Oppfølgingsvinduet er deaktivert (`follow_up_ms: 0`), så
+neste ytring krever ny aktivering.
 
 Sett miljøvariabelen `OPPER_API_KEY` for å aktivere transkripsjon med
 NB-Whisper Large via Opper/Berget. Ved lokal debugging kan nøkkelen i stedet
@@ -73,6 +74,33 @@ kan bruke FFmpeg til konvertering hvis TTS-tjenesten trenger det. Fast fil-cache
 er deaktivert for forespørselen; tekst og lyd kan likevel behandles eller
 mellomlagres av Home Assistant og den valgte TTS-leverandøren. Bruk HTTPS eller
 et pålitelig nettverk for å beskytte token og taleinnhold.
+
+### OpenAI og Home Assistant MCP
+
+Sett `OPENAI_API_KEY` i miljøet eller utviklingsfilen. Konfigurer eventuelt
+`OpenAI:Model` (miljøvariabel `OpenAI__Model`); standard er `gpt-6-luna`.
+En OpenAI API-nøkkel og API-fakturering kreves. Uten nøkkel leses
+transkripsjonen tilbake som før.
+
+Samtalehistorikken holdes kun i minnet, separat per WebSocket-forbindelse, med
+opptil seks tidligere ytringer og svar. Den slettes ved neste ytring etter fem
+minutters inaktivitet, eller når forbindelsen lukkes. Flere personer som bruker samme
+enhet deler denne historikken; taleridentifikasjon er ikke implementert.
+
+For å aktivere enhetsstyring, aktiver Home Assistants Model Context Protocol-
+integrasjon og sett `HomeAssistant:McpEnabled` til `true`
+(`HomeAssistant__McpEnabled` i container). Gatewayen bruker eksisterende
+Home Assistant-URL og token, og kobler lokalt til `/api/mcp/assist`. Bare
+enheter eksponert for Home Assistants stemmeassistenter er tilgjengelige.
+Gatewayen krever ikke at Home Assistant eksponeres mot internett. Når MCP er
+aktivert, feiler taleturen hvis MCP-tilkoblingen ikke virker.
+
+**Enhetsstyring skjer uten ekstra bekreftelse.** WebSocket-endepunktet har ingen
+autentisering, så alle med tilgang kan sende forespørsler som styrer eksponerte
+enheter. Bruk bare et pålitelig nettverk og eksponer kun ønskede enheter.
+En handling kan allerede være utført selv om taleturen avbrytes.
+Transkripsjoner, samtalehistorikk og relevante verktøyresultater sendes til
+OpenAI; kontroller tjenestens personvern- og lagringsvilkår.
 
 Lyd sendes til en ekstern tjeneste. Sjekk personvern- og lagringsvilkår før
 bruk. Transkripsjonen logges ikke som standard; sett `Marvin__LogTranscripts`

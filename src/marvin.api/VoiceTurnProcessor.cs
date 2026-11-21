@@ -9,6 +9,7 @@ internal interface IVoiceTurnProcessor
 internal sealed class TranscribingVoiceTurnProcessor(
     IVoiceTranscriber transcriber,
     IVoiceSynthesizer synthesizer,
+    IVoiceAssistant assistant,
     IConfiguration configuration,
     ILogger<TranscribingVoiceTurnProcessor> logger) : IVoiceTurnProcessor
 {
@@ -30,6 +31,7 @@ internal sealed class TranscribingVoiceTurnProcessor(
         if (string.IsNullOrWhiteSpace(text))
             return null;
 
-        return await synthesizer.SynthesizeAsync(text, cancellationToken);
+        var reply = await assistant.ReplyAsync(text, cancellationToken);
+        return await synthesizer.SynthesizeAsync(reply, cancellationToken);
     }
 }
