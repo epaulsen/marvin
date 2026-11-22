@@ -156,10 +156,10 @@ skills/
     └── SKILL.md
 ```
 
-Docker-imaget inneholder ferdighetene i repoet. For å endre dem uten å bygge nytt
-image, monter en komplett skills-mappe read-only på `/app/skills`; innholdet i
-mounten erstatter imagets innebygde ferdigheter. En annen mappe kan konfigureres
-med `Skills__Directory`.
+Docker-imaget inneholder ferdighetene i repoet. Compose monterer `../skills`
+read-only på `/app/skills`; `skills/` ligger dermed ved siden av `samples/` på
+hosten. Filene leses på nytt for hver ytring. En annen komplett mappe kan
+konfigureres med `Skills__Directory`.
 
 **Enhetsstyring skjer uten ekstra bekreftelse.** WebSocket-endepunktet har ingen
 autentisering, så alle med tilgang kan sende forespørsler som styrer eksponerte
