@@ -52,6 +52,80 @@ public sealed class OpenAiVoiceAssistantTests
     }
 
     [Fact]
+    public async Task LoadsRelevantSkillBeforeContinuingTheTurn()
+    {
+        using var directory = new TemporarySkillDirectory();
+        var skillDirectory = Path.Combine(directory.Path, "room-temperature");
+        Directory.CreateDirectory(skillDirectory);
+        File.WriteAllText(Path.Combine(skillDirectory, "SKILL.md"), """
+            ---
+            name: room-temperature
+            description: Use for room temperature questions.
+            ---
+
+            Use `current_temperature` for the measured room temperature.
+            """);
+
+        var client = new TestChatClient((_, index) => index == 0
+            ? ToolResult(OpenAiVoiceAssistant.LoadSkillToolName, """{"name":"room-temperature"}""")
+            : Result("Rommet er 21 grader."));
+        var assistant = CreateAssistant(client, new TestToolProvider(), new TestClock(),
+            CreateSkillRegistry(directory.Path));
+
+        var response = await assistant.ReplyAsync("Hvor varmt er det på soverommet?", TestContext.Current.CancellationToken);
+
+        Assert.Equal("Rommet er 21 grader.", response.Text);
+        Assert.Equal(2, client.Requests.Count);
+        Assert.Equal(2, client.ToolSets[0].Count);
+        Assert.Contains("room-temperature", Assert.IsType<SystemChatMessage>(client.Requests[0][0]).Content[0].Text,
+            StringComparison.Ordinal);
+        Assert.Contains("current_temperature", Assert.IsType<ToolChatMessage>(client.Requests[1][^1]).Content[0].Text,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ShoppingListSkillSupportsAdditionalBatchesUntilUserFinishes()
+    {
+        using var directory = new TemporarySkillDirectory();
+        var skillDirectory = Path.Combine(directory.Path, "shopping-list");
+        Directory.CreateDirectory(skillDirectory);
+        File.WriteAllText(Path.Combine(skillDirectory, "SKILL.md"), """
+            ---
+            name: shopping-list
+            description: Add requested items and keep asking what else is needed.
+            ---
+
+            Add each requested batch, confirm it, and ask whether to add more.
+            Stop when the user says they are finished.
+            """);
+
+        var toolSession = new TestToolSession("Added", toolName: "todo__HassListAddItem");
+        var client = new TestChatClient((_, index) => index switch
+        {
+            0 or 3 or 6 => ToolResult(OpenAiVoiceAssistant.LoadSkillToolName, """{"name":"shopping-list"}"""),
+            1 or 4 => ToolResult("todo__HassListAddItem", """{"item":"requested batch"}"""),
+            2 => Result("La til melk, skinke og ost. Skal jeg legge til noe mer?", requestFollowUp: true),
+            5 => Result("La til brød. Noe mer?", requestFollowUp: true),
+            7 => Result("Handlelisten er ferdig. Lykke til på handletur."),
+            _ => throw new InvalidOperationException($"Unexpected completion index: {index}")
+        });
+        var assistant = CreateAssistant(client, new TestToolProvider(toolSession), new TestClock(),
+            CreateSkillRegistry(directory.Path));
+
+        var first = await assistant.ReplyAsync("Legg til melk, skinke og ost", TestContext.Current.CancellationToken);
+        var second = await assistant.ReplyAsync("Vi må også ha brød", TestContext.Current.CancellationToken);
+        var final = await assistant.ReplyAsync("Nei, da tror jeg at vi er ferdig", TestContext.Current.CancellationToken);
+
+        Assert.True(first.RequestFollowUp);
+        Assert.True(second.RequestFollowUp);
+        Assert.False(final.RequestFollowUp);
+        Assert.Equal(2, toolSession.CallCount);
+        Assert.Equal(8, client.Requests.Count);
+        Assert.Equal("Nei, da tror jeg at vi er ferdig",
+            client.Requests[^1].OfType<UserChatMessage>().Last().Content[0].Text);
+    }
+
+    [Fact]
     public async Task AllowsTenToolCallRounds()
     {
         var toolSession = new TestToolSession();
@@ -98,8 +172,8 @@ public sealed class OpenAiVoiceAssistantTests
     public async Task MissingApiKeyPreservesEchoWithoutCallingOpenAi()
     {
         var client = new TestChatClient((_, _) => throw new InvalidOperationException());
-        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(), new ConfigurationBuilder().Build(),
-            new TestClock(), NullLogger<OpenAiVoiceAssistant>.Instance);
+        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(), CreateEmptySkillRegistry(),
+            new ConfigurationBuilder().Build(), new TestClock(), NullLogger<OpenAiVoiceAssistant>.Instance);
         Assert.Equal(new VoiceAssistantResponse("Hei"), await assistant.ReplyAsync("Hei", TestContext.Current.CancellationToken));
         Assert.Empty(client.Requests);
     }
@@ -169,8 +243,8 @@ public sealed class OpenAiVoiceAssistantTests
         var session = new TestToolSession("private result", isError: true);
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
-        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(session), configuration,
-            new TestClock(), logger);
+        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(session), CreateEmptySkillRegistry(),
+            configuration, new TestClock(), logger);
 
         await assistant.ReplyAsync("Spørsmål", TestContext.Current.CancellationToken);
 
@@ -188,8 +262,8 @@ public sealed class OpenAiVoiceAssistantTests
         var client = new TestChatClient((_, _) => ToolResult("ask_user", "private invalid json"));
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
-        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(), configuration,
-            new TestClock(), logger);
+        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(), CreateEmptySkillRegistry(),
+            configuration, new TestClock(), logger);
 
         await Assert.ThrowsAsync<InvalidDataException>(() =>
             assistant.ReplyAsync("Spørsmål", TestContext.Current.CancellationToken));
@@ -238,8 +312,8 @@ public sealed class OpenAiVoiceAssistantTests
         var client = new DelayedChatClient();
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
-        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(), configuration,
-            new TestClock(), NullLogger<OpenAiVoiceAssistant>.Instance);
+        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(), CreateEmptySkillRegistry(),
+            configuration, new TestClock(), NullLogger<OpenAiVoiceAssistant>.Instance);
         using var cancellation = new CancellationTokenSource();
         var oldTurn = assistant.ReplyAsync("Gammel", cancellation.Token);
         await client.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
@@ -253,12 +327,24 @@ public sealed class OpenAiVoiceAssistantTests
         Assert.Equal("Ny", ((UserChatMessage)context[1]).Content[0].Text);
     }
 
-    private static OpenAiVoiceAssistant CreateAssistant(TestChatClient client, TestToolProvider tools, TimeProvider clock)
+    private static OpenAiVoiceAssistant CreateAssistant(TestChatClient client, TestToolProvider tools, TimeProvider clock,
+        AgentSkillRegistry? skillRegistry = null)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
-        return new OpenAiVoiceAssistant(client, tools, configuration, clock, NullLogger<OpenAiVoiceAssistant>.Instance);
+        return new OpenAiVoiceAssistant(client, tools, skillRegistry ?? CreateEmptySkillRegistry(), configuration,
+            clock, NullLogger<OpenAiVoiceAssistant>.Instance);
     }
+
+    private static AgentSkillRegistry CreateSkillRegistry(string directory)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["Skills:Directory"] = directory }).Build();
+        return new AgentSkillRegistry(configuration, NullLogger<AgentSkillRegistry>.Instance);
+    }
+
+    private static AgentSkillRegistry CreateEmptySkillRegistry() =>
+        CreateSkillRegistry(Path.Combine(Path.GetTempPath(), $"marvin-skills-{Guid.NewGuid():N}"));
 
 #pragma warning disable OPENAI001
     private static ChatCompletion Result(string text, ChatFinishReason reason = ChatFinishReason.Stop, bool requestFollowUp = false) =>
@@ -320,12 +406,15 @@ public sealed class OpenAiVoiceAssistantTests
         }
     }
 
-    private sealed class TestToolSession(string content = "ok", bool isError = false) : IAgentToolSession
+    private sealed class TestToolSession(
+        string content = "ok",
+        bool isError = false,
+        string toolName = "turn_on") : IAgentToolSession
     {
         public (string Name, string Arguments) Call { get; private set; }
         public int CallCount { get; private set; }
         public bool Disposed { get; private set; }
-        public IReadOnlyList<ChatTool> Tools { get; } = [ChatTool.CreateFunctionTool("turn_on", "Turn on")];
+        public IReadOnlyList<ChatTool> Tools { get; } = [ChatTool.CreateFunctionTool(toolName, "Test tool")];
         public Task<AgentToolResult> CallAsync(string name, string arguments, CancellationToken cancellationToken)
         {
             Call = (name, arguments);
@@ -346,5 +435,14 @@ public sealed class OpenAiVoiceAssistantTests
         public bool IsEnabled(LogLevel logLevel) => true;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+    }
+
+    private sealed class TemporarySkillDirectory : IDisposable
+    {
+        public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"marvin-skills-{Guid.NewGuid():N}");
+
+        public TemporarySkillDirectory() => Directory.CreateDirectory(Path);
+
+        public void Dispose() => Directory.Delete(Path, recursive: true);
     }
 }

@@ -188,8 +188,8 @@ public sealed class VoiceGatewayTests
             ["OPENAI_API_KEY"] = "test-key",
             ["OPPER_API_KEY"] = "test-key"
         }).Build();
-        var assistant = new OpenAiVoiceAssistant(chat, new DisabledToolProvider(), configuration,
-            TimeProvider.System, NullLogger<OpenAiVoiceAssistant>.Instance);
+        var assistant = new OpenAiVoiceAssistant(chat, new DisabledToolProvider(), CreateEmptySkillRegistry(),
+            configuration, TimeProvider.System, NullLogger<OpenAiVoiceAssistant>.Instance);
         var synthesizer = new TestSynthesizer([1, 2, 3, 4]);
         var processor = new TranscribingVoiceTurnProcessor(new TestTranscriber(), synthesizer, assistant,
             configuration, NullLogger<TranscribingVoiceTurnProcessor>.Instance);
@@ -497,6 +497,15 @@ public sealed class VoiceGatewayTests
                 services.AddSingleton(synthesizer);
             }
         }));
+
+    private static AgentSkillRegistry CreateEmptySkillRegistry()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Skills:Directory"] = Path.Combine(Path.GetTempPath(), $"marvin-skills-{Guid.NewGuid():N}")
+        }).Build();
+        return new AgentSkillRegistry(configuration, NullLogger<AgentSkillRegistry>.Instance);
+    }
 
     private static Task<WebSocket> ConnectAsync(WebApplicationFactory<Program> factory) =>
         factory.Server.CreateWebSocketClient().ConnectAsync(new Uri("ws://localhost/voice"), TestContext.Current.CancellationToken);

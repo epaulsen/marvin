@@ -34,6 +34,7 @@ builder.Services.AddHttpClient("home-assistant-mcp")
     .RemoveAllLoggers();
 builder.Services.AddScoped<IChatCompletionClient, OpenAiChatCompletionClient>();
 builder.Services.AddScoped<IAgentToolProvider, HomeAssistantToolProvider>();
+builder.Services.AddSingleton<AgentSkillRegistry>();
 builder.Services.AddScoped<IVoiceAssistant, OpenAiVoiceAssistant>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<IVoiceTurnProcessor, TranscribingVoiceTurnProcessor>();

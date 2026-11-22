@@ -3,6 +3,8 @@
 !src/
 !src/marvin.api/
 !src/marvin.api/**
+!skills/
+!skills/**
 src/marvin.api/appsettings.Development.json
 **/bin/
 **/obj/

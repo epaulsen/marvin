@@ -78,7 +78,8 @@ public sealed class OpenAiChatCompletionClientTests
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
         var assistant = new OpenAiVoiceAssistant(new OpenAiChatCompletionClient(configuration, sdk),
-            new DisabledToolProvider(), configuration, TimeProvider.System, NullLogger<OpenAiVoiceAssistant>.Instance);
+            new DisabledToolProvider(), CreateEmptySkillRegistry(), configuration, TimeProvider.System,
+            NullLogger<OpenAiVoiceAssistant>.Instance);
 
         Assert.Equal(new VoiceAssistantResponse("Hvilket rom?", true),
             await assistant.ReplyAsync("Slå på lyset", TestContext.Current.CancellationToken));
@@ -102,7 +103,8 @@ public sealed class OpenAiChatCompletionClientTests
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
         var assistant = new OpenAiVoiceAssistant(new OpenAiChatCompletionClient(configuration, sdk),
-            new DisabledToolProvider(), configuration, TimeProvider.System, NullLogger<OpenAiVoiceAssistant>.Instance);
+            new DisabledToolProvider(), CreateEmptySkillRegistry(), configuration, TimeProvider.System,
+            NullLogger<OpenAiVoiceAssistant>.Instance);
 
         Assert.Equal(new VoiceAssistantResponse("Hva heter varmepumpen?", true),
             await assistant.ReplyAsync("Sett temperaturen", TestContext.Current.CancellationToken));
@@ -112,6 +114,15 @@ public sealed class OpenAiChatCompletionClientTests
     {
         public Task<IAgentToolSession?> OpenAsync(CancellationToken cancellationToken) =>
             Task.FromResult<IAgentToolSession?>(null);
+    }
+
+    private static AgentSkillRegistry CreateEmptySkillRegistry()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Skills:Directory"] = Path.Combine(Path.GetTempPath(), $"marvin-skills-{Guid.NewGuid():N}")
+        }).Build();
+        return new AgentSkillRegistry(configuration, NullLogger<AgentSkillRegistry>.Instance);
     }
 
     private sealed class TestHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler

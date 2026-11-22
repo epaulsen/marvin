@@ -136,6 +136,31 @@ Gatewayen krever ikke at Home Assistant eksponeres mot internett. Når MCP er
 aktivert, feiler taleturen hvis MCP-tilkoblingen ikke virker.
 Verktøykall logges med navn, status og varighet, men uten argumenter og resultater.
 
+### Agent Skills
+
+Ferdigheter følger det åpne [Agent Skills-formatet](https://agentskills.io/specification):
+legg én mappe per ferdighet under `skills/`, med obligatorisk `SKILL.md` og YAML-
+frontmatter for `name` og `description`. Marvin sender katalogen med navn og
+beskrivelser til modellen, og laster hele `SKILL.md` først når en ferdighet velges.
+Filene leses på nytt for hver ytring. Foreløpig lastes bare `SKILL.md`; eventuelle
+`references/`, `assets/` og `allowed-tools` behandles ikke, og skript kjøres aldri.
+Ferdigheter kan gi domeneregler, men kan ikke overstyre grunnreglene.
+
+Eksempel:
+
+```text
+skills/
+├── room-temperature/
+│   └── SKILL.md
+└── shopping-list/
+    └── SKILL.md
+```
+
+Docker-imaget inneholder ferdighetene i repoet. For å endre dem uten å bygge nytt
+image, monter en komplett skills-mappe read-only på `/app/skills`; innholdet i
+mounten erstatter imagets innebygde ferdigheter. En annen mappe kan konfigureres
+med `Skills__Directory`.
+
 **Enhetsstyring skjer uten ekstra bekreftelse.** WebSocket-endepunktet har ingen
 autentisering, så alle med tilgang kan sende forespørsler som styrer eksponerte
 enheter. Bruk bare et pålitelig nettverk og eksponer kun ønskede enheter.
