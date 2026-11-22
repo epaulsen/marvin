@@ -109,6 +109,42 @@ public sealed class VoiceGatewayTests
     }
 
     [Fact(Timeout = 10_000)]
+    public async Task FailedVoiceTurnKeepsWebSocketOpenForNextTurn()
+    {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
+        var synthesizer = new TestSynthesizer([9, 8, 7, 6]);
+        await using var factory = CreateFactory(new FailOnceProcessor(), synthesizer);
+        using var socket = await ConnectAsync(factory);
+        await AssertTextAsync(socket, """{"type":"hello","audio_out":"pcm","follow_up_ms":0}""");
+        await SendTextAsync(socket, """{"type":"start"}""");
+        await SendTextAsync(socket, """{"type":"wake"}""");
+        await SendAudioAsync(socket, Speech());
+        await AssertTextAsync(socket, """{"type":"phase","value":"listening"}""");
+        await SendAudioAsync(socket, new byte[25 * 1024]);
+        await AssertTextAsync(socket, """{"type":"phase","value":"thinking"}""");
+        await AssertTextAsync(socket, """{"type":"phase","value":"replying"}""");
+        var (fallbackType, fallbackAudio) = await ReceiveAsync(socket);
+        Assert.Equal(WebSocketMessageType.Binary, fallbackType);
+        Assert.Equal(new byte[] { 9, 8, 7, 6 }, fallbackAudio);
+        await AssertTextAsync(socket, """{"type":"phase","value":"idle"}""");
+        Assert.Equal(
+            "Marvin fikk hjernefeil. Vent litt, og sjekk om handlingen allerede ble utført før du prøver igjen.",
+            synthesizer.Text);
+        Assert.Equal(WebSocketState.Open, socket.State);
+
+        await SendTextAsync(socket, """{"type":"wake"}""");
+        await SendAudioAsync(socket, Speech());
+        await AssertTextAsync(socket, """{"type":"phase","value":"listening"}""");
+        await SendAudioAsync(socket, new byte[25 * 1024]);
+        await AssertTextAsync(socket, """{"type":"phase","value":"thinking"}""");
+        await AssertTextAsync(socket, """{"type":"phase","value":"replying"}""");
+        var (type, response) = await ReceiveAsync(socket);
+        Assert.Equal(WebSocketMessageType.Binary, type);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, response);
+        await AssertTextAsync(socket, """{"type":"phase","value":"idle"}""");
+    }
+
+    [Fact(Timeout = 10_000)]
     public async Task CompletedUtteranceIsTranscribedAndSpoken()
     {
         TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
@@ -446,13 +482,20 @@ public sealed class VoiceGatewayTests
         Assert.InRange(detector.Evaluate(new byte[1024]), 0f, 0.5f);
     }
 
-    private static WebApplicationFactory<Program> CreateFactory(IVoiceTurnProcessor? processor = null) =>
+    private static WebApplicationFactory<Program> CreateFactory(
+        IVoiceTurnProcessor? processor = null,
+        IVoiceSynthesizer? synthesizer = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder => builder.ConfigureServices(services =>
         {
             services.RemoveAll<IVoiceActivityDetectorFactory>();
             services.AddSingleton<IVoiceActivityDetectorFactory, TestDetectorFactory>();
             services.RemoveAll<IVoiceTurnProcessor>();
             services.AddSingleton(processor ?? new TestProcessor(null));
+            if (synthesizer is not null)
+            {
+                services.RemoveAll<IVoiceSynthesizer>();
+                services.AddSingleton(synthesizer);
+            }
         }));
 
     private static Task<WebSocket> ConnectAsync(WebApplicationFactory<Program> factory) =>
@@ -503,6 +546,18 @@ public sealed class VoiceGatewayTests
         {
             LastAudio = audio;
             return Task.FromResult(response is null ? null : new VoiceTurnResponse(response, requestFollowUp));
+        }
+    }
+
+    private sealed class FailOnceProcessor : IVoiceTurnProcessor
+    {
+        private int calls;
+
+        public Task<VoiceTurnResponse?> ProcessAsync(byte[] audio, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref calls) == 1)
+                return Task.FromException<VoiceTurnResponse?>(new InvalidDataException("Test failure"));
+            return Task.FromResult<VoiceTurnResponse?>(new VoiceTurnResponse([1, 2, 3, 4]));
         }
     }
 
