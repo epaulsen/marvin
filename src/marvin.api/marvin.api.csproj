@@ -9,6 +9,8 @@
     <PackageReference Include="ModelContextProtocol.Core" Version="2.4.0" />
     <PackageReference Include="OpenAI" Version="2.15.0" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.21.0" />
+    <PackageReference Include="YamlDotNet" Version="16.3.0" />
+    <Content Include="../../skills/**/SKILL.md" Link="skills/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Models/silero_vad.onnx" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Models/LICENSE.silero" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />

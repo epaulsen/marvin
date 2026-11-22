@@ -3,6 +3,7 @@ WORKDIR /src
 COPY src/marvin.api/marvin.api.csproj ./marvin.api/
 RUN dotnet restore marvin.api/marvin.api.csproj
 COPY src/marvin.api/ ./marvin.api/
+COPY skills/ /skills/
 RUN dotnet publish marvin.api/marvin.api.csproj -c Release --no-restore -o /app /p:UseAppHost=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:11.0 AS glibc

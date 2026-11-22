@@ -4,6 +4,8 @@ services:
     restart: unless-stopped
     ports:
       - "${MARVIN_HOST_IP:-0.0.0.0}:${MARVIN_HOST_PORT:-5678}:${MARVIN_CONTAINER_PORT:-8080}"
+    volumes:
+      - ../skills:/app/skills:ro
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       Kestrel__Endpoints__Http__Url: "http://0.0.0.0:${MARVIN_CONTAINER_PORT:-8080}"
