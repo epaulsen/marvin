@@ -7,6 +7,7 @@ namespace Marvin.Api;
 internal sealed class VoiceSocket(
     IVoiceActivityDetectorFactory detectorFactory,
     IVoiceTurnProcessor processor,
+    IVoiceSynthesizer synthesizer,
     ILogger<VoiceSocket> logger)
 {
     private const int WindowBytes = 1024;
@@ -115,9 +116,31 @@ internal sealed class VoiceSocket(
                     }
                     catch (Exception ex)
                     {
-                        logger.LogError(ex, "Voice turn failed");
-                        await SendTextAsync(socket, """{"type":"error"}""", lifetime.Token);
-                        logger.LogDebug("Sent error to Voice PE");
+                        logger.LogError(ex, "Voice turn failed; keeping WebSocket open");
+                        try
+                        {
+                            requestFollowUp = false;
+                            var recoveryAudio = await synthesizer.SynthesizeAsync(
+                                "Marvin fikk hjernefeil. Vent litt, og sjekk om handlingen allerede ble utført før du prøver igjen.",
+                                turnCancellation!.Token);
+                            if (recoveryAudio is { Length: > 0 })
+                            {
+                                await SendPhaseAsync(socket, "replying", lifetime.Token);
+                                playback = SendAudioAsync(socket, recoveryAudio, turnCancellation.Token);
+                            }
+                            else
+                            {
+                                logger.LogWarning("No recovery speech available; returning Voice PE to idle");
+                            }
+                        }
+                        catch (OperationCanceledException) when (turnCancellation!.IsCancellationRequested)
+                        {
+                            logger.LogDebug("Recovery speech cancelled");
+                        }
+                        catch (Exception recoveryException)
+                        {
+                            logger.LogWarning(recoveryException, "Failed to synthesize recovery speech");
+                        }
                     }
                     turn = null;
                     if (playback is not null)

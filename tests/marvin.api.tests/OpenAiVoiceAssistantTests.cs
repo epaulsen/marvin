@@ -52,6 +52,36 @@ public sealed class OpenAiVoiceAssistantTests
     }
 
     [Fact]
+    public async Task AllowsTenToolCallRounds()
+    {
+        var toolSession = new TestToolSession();
+        var client = new TestChatClient((_, index) => index < 10
+            ? ToolResult("turn_on", """{"name":"Kjøkken"}""")
+            : Result("Ferdig."));
+        var assistant = CreateAssistant(client, new TestToolProvider(toolSession), new TestClock());
+
+        var response = await assistant.ReplyAsync("Gjør ti ting", TestContext.Current.CancellationToken);
+
+        Assert.Equal("Ferdig.", response.Text);
+        Assert.Equal(10, toolSession.CallCount);
+        Assert.Equal(11, client.Requests.Count);
+    }
+
+    [Fact]
+    public async Task RejectsToolCallsAfterTenRounds()
+    {
+        var toolSession = new TestToolSession();
+        var client = new TestChatClient((_, _) => ToolResult("turn_on", """{"name":"Kjøkken"}"""));
+        var assistant = CreateAssistant(client, new TestToolProvider(toolSession), new TestClock());
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            assistant.ReplyAsync("Gjør mange ting", TestContext.Current.CancellationToken));
+
+        Assert.Contains("10 rounds", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(10, toolSession.CallCount);
+    }
+
+    [Fact]
     public async Task FailedTurnIsNotAddedToHistory()
     {
         var client = new TestChatClient((_, index) => index == 0
@@ -293,11 +323,13 @@ public sealed class OpenAiVoiceAssistantTests
     private sealed class TestToolSession(string content = "ok", bool isError = false) : IAgentToolSession
     {
         public (string Name, string Arguments) Call { get; private set; }
+        public int CallCount { get; private set; }
         public bool Disposed { get; private set; }
         public IReadOnlyList<ChatTool> Tools { get; } = [ChatTool.CreateFunctionTool("turn_on", "Turn on")];
         public Task<AgentToolResult> CallAsync(string name, string arguments, CancellationToken cancellationToken)
         {
             Call = (name, arguments);
+            CallCount++;
             return Task.FromResult(new AgentToolResult(content, isError));
         }
         public ValueTask DisposeAsync()

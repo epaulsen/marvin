@@ -59,7 +59,7 @@ internal sealed class OpenAiVoiceAssistant(
 {
     internal const string AskUserToolName = "ask_user";
     private const int MaxTurns = 6;
-    private const int MaxToolRounds = 4;
+    private const int MaxToolRounds = 10;
     private static readonly ChatTool AskUserTool = ChatTool.CreateFunctionTool(AskUserToolName,
         "Ask the user for information needed to continue. The question is spoken and the microphone opens for a reply.",
         BinaryData.FromString("""
@@ -121,8 +121,11 @@ internal sealed class OpenAiVoiceAssistant(
                 return SaveResponse(text, response.Text, response.RequestFollowUp, currentGeneration, cancellationToken);
             }
 
-            if (completion.FinishReason != ChatFinishReason.ToolCalls || round == MaxToolRounds)
-                throw new InvalidDataException("OpenAI did not return a complete voice response.");
+            if (completion.FinishReason != ChatFinishReason.ToolCalls)
+                throw new InvalidDataException(
+                    $"OpenAI did not return a complete voice response (finish reason: {completion.FinishReason}).");
+            if (round == MaxToolRounds)
+                throw new InvalidDataException($"OpenAI exceeded the tool call limit of {MaxToolRounds} rounds.");
             if (completion.ToolCalls.Count is 0 or > 4)
                 throw new InvalidDataException("OpenAI returned an invalid number of tool calls.");
             if (completion.ToolCalls.Any(call => string.IsNullOrEmpty(call.FunctionName)
