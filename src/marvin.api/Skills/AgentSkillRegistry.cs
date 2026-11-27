@@ -13,9 +13,9 @@ internal sealed class AgentSkillRegistry
     private readonly string skillsDirectory;
     private readonly ILogger<AgentSkillRegistry> logger;
 
-    public AgentSkillRegistry(IOptions<SkillOptions> options, ILogger<AgentSkillRegistry> logger)
+    public AgentSkillRegistry(IOptions<MarvinOptions> options, ILogger<AgentSkillRegistry> logger)
     {
-        var configuredDirectory = options.Value.Directory;
+        var configuredDirectory = options.Value.SkillsDirectory;
         skillsDirectory = Path.GetFullPath(
             string.IsNullOrWhiteSpace(configuredDirectory)
                 ? Path.Combine(AppContext.BaseDirectory, "skills")

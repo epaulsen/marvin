@@ -122,7 +122,7 @@ public sealed class OpenAiChatCompletionClientTests
         {
             ["Skills:Directory"] = Path.Combine(Path.GetTempPath(), $"marvin-skills-{Guid.NewGuid():N}")
         }).Build();
-        return new AgentSkillRegistry(TestServices.Skills(configuration), NullLogger<AgentSkillRegistry>.Instance);
+        return new AgentSkillRegistry(TestServices.Marvin(configuration), NullLogger<AgentSkillRegistry>.Instance);
     }
 
     private sealed class TestHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler

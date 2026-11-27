@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 
 namespace Marvin.Api.Telemetry;
 
-internal sealed partial class ChatTelemetry(IOptions<ApiKeyOptions> apiKeys, IOptions<HomeAssistantOptions> homeAssistant)
+internal sealed partial class ChatTelemetry(IOptions<MarvinOptions> options)
 {
     internal const string SourceName = "Marvin.Chat";
     internal static readonly ActivitySource Source = new(SourceName);
@@ -15,7 +15,7 @@ internal sealed partial class ChatTelemetry(IOptions<ApiKeyOptions> apiKeys, IOp
 
     internal string Sanitize(string value)
     {
-        foreach (var secret in new[] { apiKeys.Value.OpenAi, apiKeys.Value.Opper, homeAssistant.Value.Token })
+        foreach (var secret in new[] { options.Value.OpenAi, options.Value.Opper, options.Value.HomeAssistantToken })
         {
             if (!string.IsNullOrEmpty(secret))
                 value = value.Replace(secret, Redacted, StringComparison.Ordinal);

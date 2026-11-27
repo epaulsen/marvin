@@ -437,7 +437,7 @@ public sealed class OpenAiVoiceAssistantTests
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["Skills:Directory"] = directory }).Build();
-        return new AgentSkillRegistry(TestServices.Skills(configuration), NullLogger<AgentSkillRegistry>.Instance);
+        return new AgentSkillRegistry(TestServices.Marvin(configuration), NullLogger<AgentSkillRegistry>.Instance);
     }
 
     private static AgentSkillRegistry CreateEmptySkillRegistry() =>

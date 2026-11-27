@@ -26,7 +26,6 @@ internal sealed class OpenAiVoiceAssistant(
     IChatCompletionClient client,
     IAgentToolProvider toolProvider,
     AgentSkillRegistry skillRegistry,
-    IOptions<ApiKeyOptions> apiKeys,
     IOptions<MarvinOptions> options,
     ChatTelemetry telemetry,
     AgentToolDispatcher toolDispatcher,
@@ -87,7 +86,7 @@ internal sealed class OpenAiVoiceAssistant(
 
     private async Task<VoiceAssistantResponse> ReplyCoreAsync(string text, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(apiKeys.Value.OpenAi))
+        if (string.IsNullOrWhiteSpace(options.Value.OpenAi))
         {
             logger.LogWarning("Skipping AI response: OPENAI_API_KEY is not configured");
             return new VoiceAssistantResponse(text);

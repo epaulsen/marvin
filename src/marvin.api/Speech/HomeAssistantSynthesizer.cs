@@ -13,16 +13,16 @@ internal interface IVoiceSynthesizer
 
 internal sealed class HomeAssistantSynthesizer(
     HttpClient client,
-    IOptions<HomeAssistantOptions> options,
+    IOptions<MarvinOptions> options,
     ILogger<HomeAssistantSynthesizer> logger) : IVoiceSynthesizer
 {
     private const int MaxWavBytes = 16 * 1024 * 1024;
     private const string ProxyPrefix = "/api/tts_proxy/";
 
-    internal static bool IsConfigured(HomeAssistantOptions configuration) =>
-        !string.IsNullOrWhiteSpace(configuration.Url)
-        && !string.IsNullOrWhiteSpace(configuration.Token)
-        && !string.IsNullOrWhiteSpace(configuration.TtsEntity);
+    internal static bool IsConfigured(MarvinOptions configuration) =>
+        !string.IsNullOrWhiteSpace(configuration.HomeAssistantUrl)
+        && !string.IsNullOrWhiteSpace(configuration.HomeAssistantToken)
+        && !string.IsNullOrWhiteSpace(configuration.HomeAssistantTtsEntity);
 
     public async Task<byte[]?> SynthesizeAsync(string text, CancellationToken cancellationToken)
     {
@@ -33,7 +33,7 @@ internal sealed class HomeAssistantSynthesizer(
             return null;
         }
 
-        if (!Uri.TryCreate(configuration.Url, UriKind.Absolute, out var baseUri)
+        if (!Uri.TryCreate(configuration.HomeAssistantUrl, UriKind.Absolute, out var baseUri)
             || (baseUri.Scheme != Uri.UriSchemeHttp && baseUri.Scheme != Uri.UriSchemeHttps)
             || !string.IsNullOrEmpty(baseUri.UserInfo)
             || baseUri.AbsolutePath != "/" || !string.IsNullOrEmpty(baseUri.Query)
@@ -41,10 +41,10 @@ internal sealed class HomeAssistantSynthesizer(
             throw new InvalidOperationException("HomeAssistant:Url must be an HTTP(S) origin without a path.");
 
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(baseUri, "/api/tts_get_url"));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", configuration.Token);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", configuration.HomeAssistantToken);
         request.Content = JsonContent.Create(new
         {
-            engine_id = configuration.TtsEntity,
+            engine_id = configuration.HomeAssistantTtsEntity,
             message = text,
             cache = false,
             options = new

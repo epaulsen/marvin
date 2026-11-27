@@ -36,7 +36,8 @@ public sealed class VoiceGatewayTests
                     ["HomeAssistant:McpEnabled"] = "true",
                     ["Marvin:LogChatContent"] = "false",
                     ["Marvin:LogTranscripts"] = "true",
-                    ["Skills:Directory"] = "/tmp/marvin-test-skills"
+                    ["Skills:Directory"] = "/tmp/marvin-test-skills",
+                    ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4318"
                 }));
             builder.ConfigureServices(services =>
             {
@@ -45,19 +46,18 @@ public sealed class VoiceGatewayTests
             });
         });
 
-        var keys = factory.Services.GetRequiredService<IOptions<ApiKeyOptions>>().Value;
-        var home = factory.Services.GetRequiredService<IOptions<HomeAssistantOptions>>().Value;
         var marvin = factory.Services.GetRequiredService<IOptions<MarvinOptions>>().Value;
-        Assert.Equal("openai-test", keys.OpenAi);
-        Assert.Equal("opper-test", keys.Opper);
+        Assert.Equal("openai-test", marvin.OpenAi);
+        Assert.Equal("opper-test", marvin.Opper);
         Assert.Equal("test-model", marvin.Model);
-        Assert.Equal("http://homeassistant.local:8123", home.Url);
-        Assert.Equal("home-test", home.Token);
-        Assert.Equal("tts.test", home.TtsEntity);
-        Assert.True(home.McpEnabled);
+        Assert.Equal("http://homeassistant.local:8123", marvin.HomeAssistantUrl);
+        Assert.Equal("home-test", marvin.HomeAssistantToken);
+        Assert.Equal("tts.test", marvin.HomeAssistantTtsEntity);
+        Assert.True(marvin.HomeAssistantMcpEnabled);
         Assert.False(marvin.LogChatContent);
         Assert.True(marvin.LogTranscripts);
-        Assert.Equal("/tmp/marvin-test-skills", factory.Services.GetRequiredService<IOptions<SkillOptions>>().Value.Directory);
+        Assert.Equal("/tmp/marvin-test-skills", marvin.SkillsDirectory);
+        Assert.Equal("http://127.0.0.1:4318", marvin.OtlpEndpoint);
     }
 
     [Fact]
@@ -80,9 +80,8 @@ public sealed class VoiceGatewayTests
         });
         await using (var factory = CreateHost())
         {
-            var keys = factory.Services.GetRequiredService<IOptions<ApiKeyOptions>>();
             var options = factory.Services.GetRequiredService<IOptions<MarvinOptions>>();
-            Assert.Equal("initial-key", keys.Value.OpenAi);
+            Assert.Equal("initial-key", options.Value.OpenAi);
             Assert.True(options.Value.LogChatContent);
             Assert.Equal("initial-model", options.Value.Model);
 
@@ -91,14 +90,14 @@ public sealed class VoiceGatewayTests
             source["OpenAI:Model"] = "updated-model";
             source.Reload();
 
-            Assert.Equal("initial-key", keys.Value.OpenAi);
+            Assert.Equal("initial-key", options.Value.OpenAi);
             Assert.True(options.Value.LogChatContent);
             Assert.Equal("initial-model", options.Value.Model);
         }
 
         await using var restarted = CreateHost();
-        Assert.Equal("updated-key", restarted.Services.GetRequiredService<IOptions<ApiKeyOptions>>().Value.OpenAi);
         var updated = restarted.Services.GetRequiredService<IOptions<MarvinOptions>>().Value;
+        Assert.Equal("updated-key", updated.OpenAi);
         Assert.False(updated.LogChatContent);
         Assert.Equal("updated-model", updated.Model);
     }
@@ -590,7 +589,7 @@ public sealed class VoiceGatewayTests
         {
             ["Skills:Directory"] = Path.Combine(Path.GetTempPath(), $"marvin-skills-{Guid.NewGuid():N}")
         }).Build();
-        return new AgentSkillRegistry(TestServices.Skills(configuration), NullLogger<AgentSkillRegistry>.Instance);
+        return new AgentSkillRegistry(TestServices.Marvin(configuration), NullLogger<AgentSkillRegistry>.Instance);
     }
 
     private static Task<WebSocket> ConnectAsync(WebApplicationFactory<Program> factory) =>

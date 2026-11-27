@@ -18,19 +18,19 @@ internal interface IAgentToolSession : IAsyncDisposable
 
 internal sealed record AgentToolResult(string Content, bool IsError = false);
 
-internal sealed class HomeAssistantToolProvider(IOptions<HomeAssistantOptions> options, IHttpClientFactory clientFactory) : IAgentToolProvider
+internal sealed class HomeAssistantToolProvider(IOptions<MarvinOptions> options, IHttpClientFactory clientFactory) : IAgentToolProvider
 {
     public async Task<IAgentToolSession?> OpenAsync(CancellationToken cancellationToken)
     {
         var configuration = options.Value;
-        if (!configuration.McpEnabled)
+        if (!configuration.HomeAssistantMcpEnabled)
             return null;
 
-        if (!Uri.TryCreate(configuration.Url, UriKind.Absolute, out var baseUri)
+        if (!Uri.TryCreate(configuration.HomeAssistantUrl, UriKind.Absolute, out var baseUri)
             || (baseUri.Scheme != Uri.UriSchemeHttp && baseUri.Scheme != Uri.UriSchemeHttps)
             || !string.IsNullOrEmpty(baseUri.UserInfo) || baseUri.AbsolutePath != "/"
             || !string.IsNullOrEmpty(baseUri.Query) || !string.IsNullOrEmpty(baseUri.Fragment)
-            || string.IsNullOrWhiteSpace(configuration.Token))
+            || string.IsNullOrWhiteSpace(configuration.HomeAssistantToken))
             throw new InvalidOperationException("Home Assistant MCP requires a valid URL and token.");
 
         var http = clientFactory.CreateClient("home-assistant-mcp");
@@ -39,7 +39,7 @@ internal sealed class HomeAssistantToolProvider(IOptions<HomeAssistantOptions> o
             Endpoint = new Uri(baseUri, "/api/mcp/assist"),
             AdditionalHeaders = new Dictionary<string, string>
             {
-                ["Authorization"] = "Bearer " + configuration.Token
+                ["Authorization"] = "Bearer " + configuration.HomeAssistantToken
             }
         }, http, ownsHttpClient: true);
         McpClient? client = null;

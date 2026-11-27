@@ -99,7 +99,7 @@ public sealed class HomeAssistantSynthesizerTests
     public async Task MissingConfigurationSkipsTts()
     {
         var handler = new TestHandler((_, _) => throw new InvalidOperationException("Request was not expected"));
-        var synthesizer = new HomeAssistantSynthesizer(new HttpClient(handler), Options.Create(new HomeAssistantOptions()),
+        var synthesizer = new HomeAssistantSynthesizer(new HttpClient(handler), Options.Create(new MarvinOptions()),
             NullLogger<HomeAssistantSynthesizer>.Instance);
         Assert.Null(await synthesizer.SynthesizeAsync("Hei", TestContext.Current.CancellationToken));
     }
@@ -160,7 +160,7 @@ public sealed class HomeAssistantSynthesizerTests
             ["HomeAssistant:Token"] = "test-token",
             ["HomeAssistant:TtsEntity"] = "tts.test"
         }).Build();
-        return new HomeAssistantSynthesizer(new HttpClient(handler), TestServices.HomeAssistant(configuration),
+        return new HomeAssistantSynthesizer(new HttpClient(handler), TestServices.Marvin(configuration),
             NullLogger<HomeAssistantSynthesizer>.Instance);
     }
 

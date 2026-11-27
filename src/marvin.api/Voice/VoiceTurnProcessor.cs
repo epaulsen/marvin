@@ -18,14 +18,13 @@ internal sealed class TranscribingVoiceTurnProcessor(
     IVoiceTranscriber transcriber,
     IVoiceSynthesizer synthesizer,
     IVoiceAssistant assistant,
-    IOptions<ApiKeyOptions> apiKeys,
     IOptions<MarvinOptions> options,
     ChatTelemetry telemetry,
     ILogger<TranscribingVoiceTurnProcessor> logger) : IVoiceTurnProcessor
 {
     public async Task<VoiceTurnResponse?> ProcessAsync(byte[] audio, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(apiKeys.Value.Opper))
+        if (string.IsNullOrWhiteSpace(options.Value.Opper))
         {
             logger.LogWarning("Skipping transcription: OPPER_API_KEY is not configured");
             return null;

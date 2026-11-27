@@ -19,15 +19,12 @@ if (builder.Environment.IsDevelopment())
     builder.Configuration.AddUserSecrets<Program>(optional: true);
 builder.Configuration.AddEnvironmentVariables().AddCommandLine(args);
 
-builder.Services.AddOptions<ApiKeyOptions>().BindConfiguration("");
-builder.Services.AddOptions<HomeAssistantOptions>().BindConfiguration("HomeAssistant");
-builder.Services.AddOptions<MarvinOptions>().BindConfiguration("Marvin").BindConfiguration("OpenAI");
-builder.Services.AddOptions<SkillOptions>().BindConfiguration("Skills");
-var telemetryOptions = Options.Create(new TelemetryOptions());
-builder.Configuration.Bind(telemetryOptions.Value);
-builder.Services.AddSingleton<IOptions<TelemetryOptions>>(telemetryOptions);
+builder.Services.AddOptions<MarvinOptions>().BindConfiguration("");
+// Logging providers must be selected before the service provider is built.
+var startupOptions = Options.Create(new MarvinOptions());
+builder.Configuration.Bind(startupOptions.Value);
 
-if (!string.IsNullOrWhiteSpace(telemetryOptions.Value.Endpoint))
+if (!string.IsNullOrWhiteSpace(startupOptions.Value.OtlpEndpoint))
 {
     builder.Logging.AddOpenTelemetry(options =>
     {
@@ -68,18 +65,18 @@ builder.Services.AddScoped<IVoiceTurnProcessor, TranscribingVoiceTurnProcessor>(
 builder.Services.AddScoped<VoiceSocket>();
 
 var app = builder.Build();
-if (!string.IsNullOrWhiteSpace(app.Services.GetRequiredService<IOptions<TelemetryOptions>>().Value.Endpoint))
+if (!string.IsNullOrWhiteSpace(startupOptions.Value.OtlpEndpoint))
     _ = app.Services.GetRequiredService<TracerProvider>();
 app.Logger.LogInformation("Starting in {Environment} environment; content root: {ContentRoot}",
     app.Environment.EnvironmentName, app.Environment.ContentRootPath);
-var apiKeys = app.Services.GetRequiredService<IOptions<ApiKeyOptions>>().Value;
-if (string.IsNullOrWhiteSpace(apiKeys.Opper))
+var config = app.Services.GetRequiredService<IOptions<MarvinOptions>>().Value;
+if (string.IsNullOrWhiteSpace(config.Opper))
     app.Logger.LogWarning("OPPER_API_KEY is not configured; transcription is disabled");
 else
     app.Logger.LogInformation("Opper transcription is configured");
-if (!HomeAssistantSynthesizer.IsConfigured(app.Services.GetRequiredService<IOptions<HomeAssistantOptions>>().Value))
+if (!HomeAssistantSynthesizer.IsConfigured(config))
     app.Logger.LogWarning("Home Assistant TTS is not configured; voice responses are disabled");
-if (string.IsNullOrWhiteSpace(apiKeys.OpenAi))
+if (string.IsNullOrWhiteSpace(config.OpenAi))
     app.Logger.LogWarning("OPENAI_API_KEY is not configured; transcripts will be echoed");
 _ = app.Services.GetRequiredService<IVoiceActivityDetectorFactory>();
 app.Logger.LogInformation("Voice activity detector initialized");
