@@ -1,6 +1,8 @@
 using Marvin.Api;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Resources;
+using OpenTelemetry;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration
@@ -20,6 +22,11 @@ if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOIN
         options.ParseStateValues = true;
         options.AddOtlpExporter();
     });
+    builder.Services.AddSingleton(_ => Sdk.CreateTracerProviderBuilder()
+        .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("marvin"))
+        .AddSource(ChatTelemetry.SourceName)
+        .AddOtlpExporter()
+        .Build());
 }
 
 builder.Services.AddHealthChecks();
@@ -41,6 +48,8 @@ builder.Services.AddScoped<IVoiceTurnProcessor, TranscribingVoiceTurnProcessor>(
 builder.Services.AddScoped<VoiceSocket>();
 
 var app = builder.Build();
+if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
+    _ = app.Services.GetRequiredService<TracerProvider>();
 app.Logger.LogInformation("Starting in {Environment} environment; content root: {ContentRoot}",
     app.Environment.EnvironmentName, app.Environment.ContentRootPath);
 if (string.IsNullOrWhiteSpace(app.Configuration["OPPER_API_KEY"]))
