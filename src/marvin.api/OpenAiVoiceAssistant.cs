@@ -80,6 +80,50 @@ internal sealed class OpenAiVoiceAssistant(
 
     public async Task<VoiceAssistantResponse> ReplyAsync(string text, CancellationToken cancellationToken)
     {
+        var previousActivity = Activity.Current;
+        Activity.Current = null;
+        try
+        {
+            using var activity = ChatTelemetry.Source.StartActivity("chat turn");
+            var logContent = configuration.GetValue("Marvin:LogChatContent", true);
+            if (logContent)
+            {
+                var input = ChatTelemetry.SanitizeContent(text, configuration);
+                activity?.SetTag("marvin.chat.input", input);
+                logger.LogInformation("Chat input: {Input}", input);
+            }
+            try
+            {
+                var response = await ReplyCoreAsync(text, cancellationToken);
+                activity?.SetTag("marvin.chat.follow_up", response.RequestFollowUp);
+                if (logContent)
+                {
+                    var output = ChatTelemetry.SanitizeContent(response.Text, configuration);
+                    activity?.SetTag("marvin.chat.output", output);
+                    logger.LogInformation("Chat output: {Output}", output);
+                }
+                activity?.SetStatus(ActivityStatusCode.Ok);
+                return response;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                activity?.SetStatus(ActivityStatusCode.Error, "cancelled");
+                throw;
+            }
+            catch
+            {
+                activity?.SetStatus(ActivityStatusCode.Error, "failed");
+                throw;
+            }
+        }
+        finally
+        {
+            Activity.Current = previousActivity;
+        }
+    }
+
+    private async Task<VoiceAssistantResponse> ReplyCoreAsync(string text, CancellationToken cancellationToken)
+    {
         if (string.IsNullOrWhiteSpace(configuration["OPENAI_API_KEY"]))
         {
             logger.LogWarning("Skipping AI response: OPENAI_API_KEY is not configured");
@@ -117,7 +161,7 @@ internal sealed class OpenAiVoiceAssistant(
         logger.LogDebug("Requesting OpenAI response; available tools: {ToolCount}", tools.Count);
         for (var round = 0; round <= MaxToolRounds; round++)
         {
-            var completion = await client.CompleteAsync(messages, tools, cancellationToken);
+            var completion = await CompleteRoundAsync(messages, tools, round + 1, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             if (completion.FinishReason == ChatFinishReason.Stop)
             {
@@ -142,7 +186,7 @@ internal sealed class OpenAiVoiceAssistant(
             {
                 if (completion.ToolCalls.Count != 1)
                     throw new InvalidDataException("OpenAI requested clarification alongside other tool calls.");
-                var result = await ExecuteToolAsync(AskUserToolName, () =>
+                var result = await ExecuteToolAsync(AskUserToolName, completion.ToolCalls[0].FunctionArguments.ToString(), round + 1, () =>
                     Task.FromResult(new AgentToolResult(ParseQuestion(completion.ToolCalls[0].FunctionArguments.ToString()))),
                     cancellationToken);
                 return SaveResponse(text, result.Content, true, currentGeneration, cancellationToken);
@@ -155,9 +199,9 @@ internal sealed class OpenAiVoiceAssistant(
                 messages.Add(new AssistantChatMessage(completion));
                 foreach (var call in completion.ToolCalls)
                 {
-                    var skillName = ParseSkillName(call.FunctionArguments.ToString());
-                    var result = await ExecuteToolAsync(LoadSkillToolName,
-                        () => Task.FromResult(LoadSkill(skillName, availableSkills)), cancellationToken);
+                    var result = await ExecuteToolAsync(LoadSkillToolName, call.FunctionArguments.ToString(), round + 1,
+                        () => Task.FromResult(LoadSkill(ParseSkillName(call.FunctionArguments.ToString()), availableSkills)),
+                        cancellationToken);
                     messages.Add(new ToolChatMessage(call.Id, result.Content));
                 }
                 continue;
@@ -170,7 +214,7 @@ internal sealed class OpenAiVoiceAssistant(
             foreach (var call in completion.ToolCalls)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var result = await ExecuteToolAsync(call.FunctionName,
+                var result = await ExecuteToolAsync(call.FunctionName, call.FunctionArguments.ToString(), round + 1,
                     () => session.CallAsync(call.FunctionName, call.FunctionArguments.ToString(), cancellationToken),
                     cancellationToken);
                 messages.Add(new ToolChatMessage(call.Id, result.Content));
@@ -227,26 +271,83 @@ internal sealed class OpenAiVoiceAssistant(
         throw new InvalidDataException("OpenAI returned an invalid skill name.");
     }
 
-    private async Task<AgentToolResult> ExecuteToolAsync(string name, Func<Task<AgentToolResult>> execute,
+    private async Task<ChatCompletion> CompleteRoundAsync(IReadOnlyList<ChatMessage> messages,
+        IReadOnlyList<ChatTool> tools, int round, CancellationToken cancellationToken)
+    {
+        using var activity = ChatTelemetry.Source.StartActivity("AI round");
+        activity?.SetTag("marvin.chat.round", round);
+        activity?.SetTag("gen_ai.request.model", configuration["OpenAI:Model"] ?? "gpt-6-luna");
+        logger.LogInformation("AI round {Round} started", round);
+        try
+        {
+            var completion = await client.CompleteAsync(messages, tools, cancellationToken);
+            activity?.SetTag("marvin.chat.finish_reason", completion.FinishReason.ToString());
+            activity?.SetTag("marvin.chat.tool_count", completion.ToolCalls.Count);
+            var content = string.Concat(completion.Content.Select(part => part.Text));
+            if (content.Length > 0 && configuration.GetValue("Marvin:LogChatContent", true))
+            {
+                var output = ChatTelemetry.SanitizeContent(content, configuration);
+                activity?.SetTag("marvin.chat.output", output);
+                logger.LogInformation("AI round {Round} output: {Output}", round, output);
+            }
+            logger.LogInformation("AI round {Round} finished: {FinishReason}; tool calls: {ToolCount}",
+                round, completion.FinishReason, completion.ToolCalls.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return completion;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, "cancelled");
+            logger.LogInformation("AI round {Round} cancelled", round);
+            throw;
+        }
+        catch
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, "failed");
+            logger.LogWarning("AI round {Round} failed", round);
+            throw;
+        }
+    }
+
+    private async Task<AgentToolResult> ExecuteToolAsync(string name, string arguments, int round, Func<Task<AgentToolResult>> execute,
         CancellationToken cancellationToken)
     {
+        using var activity = ChatTelemetry.Source.StartActivity("tool " + name);
+        activity?.SetTag("marvin.chat.round", round);
+        activity?.SetTag("marvin.tool.name", name);
         logger.LogInformation("Tool call started: {ToolName}", name);
+        if (configuration.GetValue("Marvin:LogChatContent", true))
+        {
+            var sanitized = ChatTelemetry.SanitizeJson(arguments, configuration);
+            activity?.SetTag("marvin.tool.arguments", sanitized);
+            logger.LogInformation("Tool call arguments: {ToolName}; {Arguments}", name, sanitized);
+        }
         var started = Stopwatch.GetTimestamp();
         try
         {
             var result = await execute();
+            if (configuration.GetValue("Marvin:LogChatContent", true))
+            {
+                var sanitized = ChatTelemetry.SanitizeContent(result.Content, configuration);
+                activity?.SetTag("marvin.tool.result", sanitized);
+                logger.LogInformation("Tool call result: {ToolName}; {Result}", name, sanitized);
+            }
+            activity?.SetStatus(result.IsError ? ActivityStatusCode.Error : ActivityStatusCode.Ok,
+                result.IsError ? "reported error" : null);
             logger.LogInformation("Tool call finished: {ToolName}; status: {Status}; duration: {ElapsedMs:F0} ms",
                 name, result.IsError ? "reported error" : "completed", Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             return result;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            activity?.SetStatus(ActivityStatusCode.Error, "cancelled");
             logger.LogInformation("Tool call cancelled: {ToolName}; duration: {ElapsedMs:F0} ms",
                 name, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             throw;
         }
         catch
         {
+            activity?.SetStatus(ActivityStatusCode.Error, "failed");
             logger.LogWarning("Tool call failed: {ToolName}; duration: {ElapsedMs:F0} ms",
                 name, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             throw;

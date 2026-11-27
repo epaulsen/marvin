@@ -40,6 +40,16 @@ begrense bindingen. OTLP-mottaket er ikke publisert til vertsmaskinen.
 Dashboardet er for kortvarig feilsøking, ikke permanent logglagring.
 Ved kjøring uten Compose aktiveres eksport bare når `OTEL_EXPORTER_OTLP_ENDPOINT`
 er konfigurert; konsollogging fungerer fortsatt som før.
+
+Under **Traces** vises én trace per ytring med AI-runder og verktøykall i
+rekkefølge, inkludert varighet og status. Samtalens tekst, verktøyargumenter og
+resultater vises også i trace-attributter og strukturerte logger. Sett
+`MARVIN_LOG_CHAT_CONTENT=false` i Compose sin `.env`, eller
+`Marvin__LogChatContent=false` ellers, for å slå av innholdet uten å slå av traces.
+Kjente konfigurerte nøkler og vanlige autentiseringsfelt maskeres; automatisk
+maskering kan ikke garantere at alle hemmeligheter i vilkårlig tekst fanges opp.
+`Marvin__LogTranscripts` styrer den separate transkripsjonsloggen.
+
 Loggene kan også leses uten nettleser, for eksempel med Aspire CLI eller:
 
 ```sh

@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using Marvin.Api;
 using Microsoft.Extensions.Configuration;
@@ -242,7 +244,7 @@ public sealed class OpenAiVoiceAssistantTests
             : ToolResult("ask_user", """{"question":"private question"}"""));
         var session = new TestToolSession("private result", isError: true);
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
-            new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
+            new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key", ["Marvin:LogChatContent"] = "false" }).Build();
         var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(session), CreateEmptySkillRegistry(),
             configuration, new TestClock(), logger);
 
@@ -253,6 +255,79 @@ public sealed class OpenAiVoiceAssistantTests
         Assert.Contains(logger.Messages, entry => entry.Contains("Tool call started: ask_user"));
         Assert.Contains(logger.Messages, entry => entry.Contains("ask_user; status: completed; duration:"));
         Assert.DoesNotContain(logger.Messages, entry => entry.Contains("private", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TracesEachRoundAndToolWithRedactedContent()
+    {
+        var activities = new ConcurrentQueue<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == ChatTelemetry.SourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activities.Enqueue
+        };
+        ActivitySource.AddActivityListener(listener);
+        using var outer = new Activity("websocket").Start();
+        var logger = new CapturingLogger<OpenAiVoiceAssistant>();
+        var client = new TestChatClient((_, index) => index switch
+        {
+            0 => ToolResult("turn_on", """{"name":"Kjøkken","authorization":"Bearer tool-secret","nested":{"apiKey":"key-secret"}}"""),
+            1 => ToolResult("turn_on", """{"name":"Stue"}"""),
+            _ => Result("Lyset er på.")
+        });
+        var session = new TestToolSession("""{"value":"på","access_token":"result-secret","message":"Authorization: Basic abc123"}""",
+            isError: true);
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["OPENAI_API_KEY"] = "configured-secret",
+            ["HomeAssistant:Token"] = "ha-secret"
+        }).Build();
+        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(session), CreateEmptySkillRegistry(),
+            configuration, new TestClock(), logger);
+
+        var response = await assistant.ReplyAsync("Slå på configured-secret", TestContext.Current.CancellationToken);
+
+        Assert.Equal("Lyset er på.", response.Text);
+        Assert.Same(outer, Activity.Current);
+        var turn = Assert.Single(activities, activity => activity.OperationName == "chat turn");
+        Assert.Null(turn.ParentId);
+        var spans = activities.Where(activity => activity.ParentSpanId == turn.SpanId)
+            .OrderBy(activity => activity.StartTimeUtc).ToArray();
+        Assert.Equal(["AI round", "tool turn_on", "AI round", "tool turn_on", "AI round"],
+            spans.Select(activity => activity.OperationName));
+        Assert.All(spans, span => Assert.Equal(turn.TraceId, span.TraceId));
+        Assert.Equal(ActivityStatusCode.Error, spans[1].Status);
+        Assert.Equal(ActivityStatusCode.Ok, turn.Status);
+        using var arguments = JsonDocument.Parse((string)spans[1].GetTagItem("marvin.tool.arguments")!);
+        using var result = JsonDocument.Parse((string)spans[1].GetTagItem("marvin.tool.result")!);
+        Assert.Equal("Kjøkken", arguments.RootElement.GetProperty("name").GetString());
+        Assert.Equal("på", result.RootElement.GetProperty("value").GetString());
+        Assert.Equal("Lyset er på.", turn.GetTagItem("marvin.chat.output"));
+        var recorded = string.Join("\n", logger.Messages.Concat(activities.SelectMany(activity =>
+            activity.TagObjects.Select(tag => tag.Value?.ToString() ?? ""))));
+        Assert.DoesNotContain("configured-secret", recorded);
+        Assert.DoesNotContain("tool-secret", recorded);
+        Assert.DoesNotContain("key-secret", recorded);
+        Assert.DoesNotContain("result-secret", recorded);
+        Assert.DoesNotContain("abc123", recorded);
+        Assert.Contains("[REDACTED]", recorded);
+    }
+
+    [Fact]
+    public void SanitizesNestedJsonAndOmitsMalformedToolArguments()
+    {
+        var configuration = new ConfigurationBuilder().Build();
+        var content = """{"data":"{\"password\":\"nested-secret\",\"room\":\"Stue\"}","token":"top-secret"}""";
+
+        var sanitized = ChatTelemetry.SanitizeJson(content, configuration);
+
+        Assert.Contains("Stue", sanitized);
+        Assert.DoesNotContain("nested-secret", sanitized);
+        Assert.DoesNotContain("top-secret", sanitized);
+        Assert.Equal("[invalid JSON omitted]", ChatTelemetry.SanitizeJson("password: secret", configuration));
+        Assert.Equal("[credential content omitted]",
+            ChatTelemetry.Sanitize("""Embedded {"password":"multiple words"}""", configuration));
     }
 
     [Fact]

@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using OpenAI.Chat;
 using OpenTelemetry.Logs;
+using OpenTelemetry.Trace;
 using Xunit;
 
 namespace Marvin.Api.Tests;
@@ -35,6 +36,7 @@ public sealed class VoiceGatewayTests
 
         var providers = factory.Services.GetServices<ILoggerProvider>();
         Assert.Equal(enabled, providers.Any(provider => provider is OpenTelemetryLoggerProvider));
+        Assert.Equal(enabled, factory.Services.GetService<TracerProvider>() is not null);
     }
 
     [Theory(Timeout = 10_000)]

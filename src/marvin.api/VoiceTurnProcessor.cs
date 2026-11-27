@@ -26,7 +26,7 @@ internal sealed class TranscribingVoiceTurnProcessor(
         logger.LogDebug("Starting transcription for {AudioBytes} PCM bytes", audio.Length);
         var text = await transcriber.TranscribeAsync(audio, cancellationToken);
         if (configuration.GetValue<bool>("Marvin:LogTranscripts"))
-            logger.LogInformation("Transcript: {Transcript}", text);
+            logger.LogInformation("Transcript: {Transcript}", ChatTelemetry.Sanitize(text, configuration));
         else
             logger.LogInformation("Transcription completed");
 
