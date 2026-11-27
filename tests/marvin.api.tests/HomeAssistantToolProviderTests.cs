@@ -53,13 +53,13 @@ public sealed class HomeAssistantToolProviderTests
         Assert.Empty(handler.Methods);
     }
 
-    private static IConfiguration Configuration(bool enabled) =>
-        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+    private static IOptions<MarvinOptions> Configuration(bool enabled) =>
+        Options.Create(new MarvinOptions
         {
-            ["HomeAssistant:Url"] = "http://homeassistant.local:8123",
-            ["HomeAssistant:Token"] = "test-token",
-            ["HomeAssistant:McpEnabled"] = enabled.ToString()
-        }).Build();
+            HomeAssistantUrl = "http://homeassistant.local:8123",
+            HomeAssistantToken = "test-token",
+            HomeAssistantMcpEnabled = enabled
+        });
 
     private sealed class TestHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
     {

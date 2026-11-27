@@ -2,7 +2,9 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 
-namespace Marvin.Api;
+using Marvin.Api.Speech;
+
+namespace Marvin.Api.Voice;
 
 internal sealed class VoiceSocket(
     IVoiceActivityDetectorFactory detectorFactory,

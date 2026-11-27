@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Marvin.Api;
@@ -99,7 +100,8 @@ public sealed class HomeAssistantSynthesizerTests
     public async Task MissingConfigurationSkipsTts()
     {
         var handler = new TestHandler((_, _) => throw new InvalidOperationException("Request was not expected"));
-        var synthesizer = new HomeAssistantSynthesizer(new HttpClient(handler), new ConfigurationBuilder().Build(),
+        var synthesizer = new HomeAssistantSynthesizer(new HttpClient(handler), new TestHttpClientFactory(handler),
+            Options.Create(new MarvinOptions()),
             NullLogger<HomeAssistantSynthesizer>.Instance);
         Assert.Null(await synthesizer.SynthesizeAsync("Hei", TestContext.Current.CancellationToken));
     }
@@ -160,8 +162,22 @@ public sealed class HomeAssistantSynthesizerTests
             ["HomeAssistant:Token"] = "test-token",
             ["HomeAssistant:TtsEntity"] = "tts.test"
         }).Build();
-        return new HomeAssistantSynthesizer(new HttpClient(handler), configuration,
+        var client = new HttpClient(handler, disposeHandler: false)
+        {
+            BaseAddress = new Uri("http://homeassistant.local:8123")
+        };
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
+        return new HomeAssistantSynthesizer(client, new TestHttpClientFactory(handler), TestServices.Marvin(configuration),
             NullLogger<HomeAssistantSynthesizer>.Instance);
+    }
+
+    private sealed class TestHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name)
+        {
+            Assert.Equal(HomeAssistantSynthesizer.AudioClientName, name);
+            return new HttpClient(handler, disposeHandler: false);
+        }
     }
 
     private sealed class TestHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler

@@ -45,7 +45,7 @@ public sealed class OpenAiChatCompletionClientTests
         {
             Transport = new HttpClientPipelineTransport(new HttpClient(handler))
         });
-        var client = new OpenAiChatCompletionClient(new ConfigurationBuilder().Build(), sdk);
+        var client = TestServices.ChatClient(new ConfigurationBuilder().Build(), sdk);
         var response = await client.CompleteAsync([new UserChatMessage("Hei")],
             [ChatTool.CreateFunctionTool("test_tool", "Test")], TestContext.Current.CancellationToken);
         Assert.Equal("""{"text":"Hei tilbake","needs_follow_up":false}""", response.Content[0].Text);
@@ -77,7 +77,7 @@ public sealed class OpenAiChatCompletionClientTests
         });
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
-        var assistant = new OpenAiVoiceAssistant(new OpenAiChatCompletionClient(configuration, sdk),
+        var assistant = TestServices.Assistant(TestServices.ChatClient(configuration, sdk),
             new DisabledToolProvider(), CreateEmptySkillRegistry(), configuration, TimeProvider.System,
             NullLogger<OpenAiVoiceAssistant>.Instance);
 
@@ -102,7 +102,7 @@ public sealed class OpenAiChatCompletionClientTests
         });
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
-        var assistant = new OpenAiVoiceAssistant(new OpenAiChatCompletionClient(configuration, sdk),
+        var assistant = TestServices.Assistant(TestServices.ChatClient(configuration, sdk),
             new DisabledToolProvider(), CreateEmptySkillRegistry(), configuration, TimeProvider.System,
             NullLogger<OpenAiVoiceAssistant>.Instance);
 
@@ -122,7 +122,7 @@ public sealed class OpenAiChatCompletionClientTests
         {
             ["Skills:Directory"] = Path.Combine(Path.GetTempPath(), $"marvin-skills-{Guid.NewGuid():N}")
         }).Build();
-        return new AgentSkillRegistry(configuration, NullLogger<AgentSkillRegistry>.Instance);
+        return new AgentSkillRegistry(TestServices.Marvin(configuration), NullLogger<AgentSkillRegistry>.Instance);
     }
 
     private sealed class TestHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler

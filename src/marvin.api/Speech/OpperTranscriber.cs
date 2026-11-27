@@ -1,8 +1,7 @@
 using System.Buffers.Binary;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 
-namespace Marvin.Api;
+namespace Marvin.Api.Speech;
 
 internal interface IVoiceTranscriber
 {
@@ -11,7 +10,6 @@ internal interface IVoiceTranscriber
 
 internal sealed class OpperTranscriber(
     HttpClient client,
-    IConfiguration configuration,
     ILogger<OpperTranscriber> logger) : IVoiceTranscriber
 {
     private const string Model = "berget/NbAiLab/nb-whisper-large";
@@ -23,7 +21,6 @@ internal sealed class OpperTranscriber(
 
         var wav = CreateWav(audio);
         using var request = new HttpRequestMessage(HttpMethod.Post, "v3/audio/transcriptions");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", configuration["OPPER_API_KEY"]);
         request.Content = JsonContent.Create(new
         {
             model = Model,

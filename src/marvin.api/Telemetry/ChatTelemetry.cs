@@ -2,20 +2,21 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Marvin.Api.Configuration;
+using Microsoft.Extensions.Options;
 
-namespace Marvin.Api;
+namespace Marvin.Api.Telemetry;
 
-internal static partial class ChatTelemetry
+internal sealed partial class ChatTelemetry(IOptions<MarvinOptions> options)
 {
     internal const string SourceName = "Marvin.Chat";
     internal static readonly ActivitySource Source = new(SourceName);
     private const string Redacted = "[REDACTED]";
 
-    internal static string Sanitize(string value, IConfiguration configuration)
+    internal string Sanitize(string value)
     {
-        foreach (var key in new[] { "OPENAI_API_KEY", "OPPER_API_KEY", "HomeAssistant:Token" })
+        foreach (var secret in new[] { options.Value.OpenAi, options.Value.Opper, options.Value.HomeAssistantToken })
         {
-            var secret = configuration[key];
             if (!string.IsNullOrEmpty(secret))
                 value = value.Replace(secret, Redacted, StringComparison.Ordinal);
         }
@@ -28,12 +29,12 @@ internal static partial class ChatTelemetry
         return value;
     }
 
-    internal static string SanitizeJson(string value, IConfiguration configuration)
+    internal string SanitizeJson(string value)
     {
         try
         {
             var node = JsonNode.Parse(value);
-            return SanitizeNode(node, configuration)?.ToJsonString() ?? "null";
+            return SanitizeNode(node)?.ToJsonString() ?? "null";
         }
         catch (JsonException)
         {
@@ -41,27 +42,27 @@ internal static partial class ChatTelemetry
         }
     }
 
-    internal static string SanitizeContent(string value, IConfiguration configuration)
+    internal string SanitizeContent(string value)
     {
         var trimmed = value.TrimStart();
         return trimmed.StartsWith('{') || trimmed.StartsWith('[')
-            ? SanitizeJson(value, configuration)
-            : Sanitize(value, configuration);
+            ? SanitizeJson(value)
+            : Sanitize(value);
     }
 
-    private static JsonNode? SanitizeNode(JsonNode? node, IConfiguration configuration)
+    private JsonNode? SanitizeNode(JsonNode? node)
     {
         if (node is JsonObject obj)
         {
             foreach (var property in obj.ToArray())
                 obj[property.Key] = SensitiveName().IsMatch(property.Key)
                     ? JsonValue.Create(Redacted)
-                    : SanitizeNode(property.Value?.DeepClone(), configuration);
+                    : SanitizeNode(property.Value?.DeepClone());
         }
         else if (node is JsonArray array)
         {
             for (var i = 0; i < array.Count; i++)
-                array[i] = SanitizeNode(array[i]?.DeepClone(), configuration);
+                array[i] = SanitizeNode(array[i]?.DeepClone());
         }
         else if (node is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var text))
         {
@@ -71,14 +72,14 @@ internal static partial class ChatTelemetry
                 try
                 {
                     var nested = JsonNode.Parse(text);
-                    return JsonValue.Create(SanitizeNode(nested, configuration)?.ToJsonString());
+                    return JsonValue.Create(SanitizeNode(nested)?.ToJsonString());
                 }
                 catch (JsonException)
                 {
                     return JsonValue.Create("[invalid JSON omitted]");
                 }
             }
-            return JsonValue.Create(Sanitize(text, configuration));
+            return JsonValue.Create(Sanitize(text));
         }
         return node;
     }
