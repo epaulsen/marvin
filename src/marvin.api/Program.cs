@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using Marvin.Api.Chat;
 using Marvin.Api.Configuration;
 using Marvin.Api.Skills;
@@ -43,9 +44,27 @@ if (!string.IsNullOrWhiteSpace(startupOptions.Value.OtlpEndpoint))
 
 builder.Services.AddHealthChecks();
 builder.Services.AddSingleton<IVoiceActivityDetectorFactory, SileroVadModel>();
-builder.Services.AddHttpClient<IVoiceTranscriber, OpperTranscriber>(client =>
-    client.BaseAddress = new Uri("https://api.opper.ai/"));
-builder.Services.AddHttpClient<IVoiceSynthesizer, HomeAssistantSynthesizer>()
+builder.Services.AddHttpClient<IVoiceTranscriber, OpperTranscriber>((services, client) =>
+{
+    client.BaseAddress = new Uri("https://api.opper.ai/");
+    var token = services.GetRequiredService<IOptions<MarvinOptions>>().Value.Opper;
+    if (!string.IsNullOrWhiteSpace(token))
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+});
+builder.Services.AddHttpClient<IVoiceSynthesizer, HomeAssistantSynthesizer>((services, client) =>
+{
+    var config = services.GetRequiredService<IOptions<MarvinOptions>>().Value;
+    if (Uri.TryCreate(config.HomeAssistantUrl, UriKind.Absolute, out var baseUri)
+        && (baseUri.Scheme == Uri.UriSchemeHttp || baseUri.Scheme == Uri.UriSchemeHttps)
+        && string.IsNullOrEmpty(baseUri.UserInfo) && baseUri.AbsolutePath == "/"
+        && string.IsNullOrEmpty(baseUri.Query) && string.IsNullOrEmpty(baseUri.Fragment))
+        client.BaseAddress = baseUri;
+    if (!string.IsNullOrWhiteSpace(config.HomeAssistantToken))
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", config.HomeAssistantToken);
+})
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
+    .RemoveAllLoggers();
+builder.Services.AddHttpClient(HomeAssistantSynthesizer.AudioClientName)
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false })
     .RemoveAllLoggers();
 builder.Services.AddHttpClient("home-assistant-mcp")

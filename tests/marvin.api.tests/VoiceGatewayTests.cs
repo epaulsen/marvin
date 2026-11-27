@@ -383,6 +383,8 @@ public sealed class VoiceGatewayTests
                     .ConfigurePrimaryHttpMessageHandler(() => new TranscriptionHandler());
                 services.AddHttpClient<IVoiceSynthesizer, HomeAssistantSynthesizer>()
                     .ConfigurePrimaryHttpMessageHandler(() => tts);
+                services.AddHttpClient(HomeAssistantSynthesizer.AudioClientName)
+                    .ConfigurePrimaryHttpMessageHandler(() => tts);
                 services.RemoveAll<IChatCompletionClient>();
                 services.AddSingleton<IChatCompletionClient, TestChatCompletionClient>();
             });
@@ -401,6 +403,38 @@ public sealed class VoiceGatewayTests
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, response);
         await AssertTextAsync(socket, """{"type":"phase","value":"idle"}""");
         Assert.Equal("Hei tilbake", tts.Text);
+    }
+
+    [Theory]
+    [InlineData("http://homeassistant.local:8123/path")]
+    [InlineData("http://user:password@homeassistant.local:8123")]
+    [InlineData("http://homeassistant.local:8123/?token=secret")]
+    public async Task RejectsUnsafeHomeAssistantOriginBeforeSendingCredentials(string url)
+    {
+        var handler = new UnexpectedRequestHandler();
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration(configuration => configuration.AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["HomeAssistant:Url"] = url,
+                    ["HomeAssistant:Token"] = "test-token",
+                    ["HomeAssistant:TtsEntity"] = "tts.test"
+                }));
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IVoiceActivityDetectorFactory>();
+                services.AddSingleton<IVoiceActivityDetectorFactory, TestDetectorFactory>();
+                services.AddHttpClient<IVoiceSynthesizer, HomeAssistantSynthesizer>()
+                    .ConfigurePrimaryHttpMessageHandler(() => handler);
+            });
+        });
+        using var scope = factory.Services.CreateScope();
+        var synthesizer = scope.ServiceProvider.GetRequiredService<IVoiceSynthesizer>();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            synthesizer.SynthesizeAsync("Hei", TestContext.Current.CancellationToken));
+        Assert.False(handler.Received);
     }
 
     [Fact]
@@ -734,6 +768,9 @@ public sealed class VoiceGatewayTests
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            Assert.Equal(new Uri("https://api.opper.ai/v3/audio/transcriptions"), request.RequestUri);
+            Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
+            Assert.Equal("test-key", request.Headers.Authorization?.Parameter);
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
             var dataUri = json.RootElement.GetProperty("audio").GetString()!;
             var wav = Convert.FromBase64String(dataUri["data:audio/wav;base64,".Length..]);
@@ -753,6 +790,9 @@ public sealed class VoiceGatewayTests
         {
             if (request.Method == HttpMethod.Post)
             {
+                Assert.Equal(new Uri("http://homeassistant.local:8123/api/tts_get_url"), request.RequestUri);
+                Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
+                Assert.Equal("test-token", request.Headers.Authorization?.Parameter);
                 using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
                 Text = json.RootElement.GetProperty("message").GetString();
                 return new HttpResponseMessage(HttpStatusCode.OK)
@@ -761,9 +801,22 @@ public sealed class VoiceGatewayTests
                 };
             }
 
+            Assert.Equal(new Uri("http://homeassistant.local:8123/api/tts_proxy/test.wav"), request.RequestUri);
+            Assert.Null(request.Headers.Authorization);
             var wav = Convert.FromHexString(
                 "524946462800000057415645666D74201000000001000100C05D000080BB000002001000646174610400000001020304");
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(wav) };
+        }
+    }
+
+    private sealed class UnexpectedRequestHandler : HttpMessageHandler
+    {
+        public bool Received { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Received = true;
+            throw new HttpRequestException("Credentials must not be sent to an unsafe origin.");
         }
     }
 

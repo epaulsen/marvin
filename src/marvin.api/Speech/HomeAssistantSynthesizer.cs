@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Marvin.Api.Configuration;
 using Microsoft.Extensions.Options;
@@ -13,11 +12,13 @@ internal interface IVoiceSynthesizer
 
 internal sealed class HomeAssistantSynthesizer(
     HttpClient client,
+    IHttpClientFactory clientFactory,
     IOptions<MarvinOptions> options,
     ILogger<HomeAssistantSynthesizer> logger) : IVoiceSynthesizer
 {
     private const int MaxWavBytes = 16 * 1024 * 1024;
     private const string ProxyPrefix = "/api/tts_proxy/";
+    internal const string AudioClientName = "home-assistant-tts-audio";
 
     internal static bool IsConfigured(MarvinOptions configuration) =>
         !string.IsNullOrWhiteSpace(configuration.HomeAssistantUrl)
@@ -33,15 +34,11 @@ internal sealed class HomeAssistantSynthesizer(
             return null;
         }
 
-        if (!Uri.TryCreate(configuration.HomeAssistantUrl, UriKind.Absolute, out var baseUri)
-            || (baseUri.Scheme != Uri.UriSchemeHttp && baseUri.Scheme != Uri.UriSchemeHttps)
-            || !string.IsNullOrEmpty(baseUri.UserInfo)
-            || baseUri.AbsolutePath != "/" || !string.IsNullOrEmpty(baseUri.Query)
-            || !string.IsNullOrEmpty(baseUri.Fragment))
+        var baseUri = client.BaseAddress;
+        if (baseUri is null)
             throw new InvalidOperationException("HomeAssistant:Url must be an HTTP(S) origin without a path.");
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(baseUri, "/api/tts_get_url"));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", configuration.HomeAssistantToken);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/tts_get_url");
         request.Content = JsonContent.Create(new
         {
             engine_id = configuration.HomeAssistantTtsEntity,
@@ -68,7 +65,8 @@ internal sealed class HomeAssistantSynthesizer(
             throw new InvalidDataException("Home Assistant returned an invalid TTS audio path.");
 
         using var audioRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(baseUri, path));
-        using var audioResponse = await client.SendAsync(audioRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var audioClient = clientFactory.CreateClient(AudioClientName);
+        using var audioResponse = await audioClient.SendAsync(audioRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         audioResponse.EnsureSuccessStatusCode();
         if (audioResponse.Content.Headers.ContentLength > MaxWavBytes)
             throw new InvalidDataException("Home Assistant TTS audio exceeds the size limit.");

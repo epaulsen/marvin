@@ -1,9 +1,9 @@
 using System.Buffers.Binary;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Marvin.Api;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -90,10 +90,9 @@ public sealed class OpperTranscriberTests
 
     private static OpperTranscriber CreateTranscriber(HttpMessageHandler handler)
     {
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(
-            new Dictionary<string, string?> { ["OPPER_API_KEY"] = "test-key" }).Build();
-        return new OpperTranscriber(new HttpClient(handler) { BaseAddress = new Uri("https://api.opper.ai/") },
-            TestServices.Marvin(configuration), NullLogger<OpperTranscriber>.Instance);
+        var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.opper.ai/") };
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-key");
+        return new OpperTranscriber(client, NullLogger<OpperTranscriber>.Instance);
     }
 
     private sealed class TestHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
