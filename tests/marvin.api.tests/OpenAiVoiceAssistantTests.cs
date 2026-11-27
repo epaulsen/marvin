@@ -53,6 +53,28 @@ public sealed class OpenAiVoiceAssistantTests
         Assert.True(toolSession.Disposed);
     }
 
+#pragma warning disable OPENAI001
+    [Theory]
+    [InlineData("ask_user")]
+    [InlineData("load_skill")]
+    public async Task RejectsMixedBuiltInAndHomeAssistantCallsWithoutExecutingEither(string builtIn)
+    {
+        var session = new TestToolSession();
+        var client = new TestChatClient((_, _) => OpenAIChatModelFactory.ChatCompletion(
+            finishReason: ChatFinishReason.ToolCalls, content: new ChatMessageContent(), role: ChatMessageRole.Assistant,
+            toolCalls:
+            [
+                ChatToolCall.CreateFunctionToolCall("call-1", builtIn, BinaryData.FromString("{}")),
+                ChatToolCall.CreateFunctionToolCall("call-2", "turn_on", BinaryData.FromString("{}"))
+            ]));
+        var assistant = CreateAssistant(client, new TestToolProvider(session), new TestClock());
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            assistant.ReplyAsync("Test", TestContext.Current.CancellationToken));
+        Assert.Equal(0, session.CallCount);
+    }
+#pragma warning restore OPENAI001
+
     [Fact]
     public async Task LoadsRelevantSkillBeforeContinuingTheTurn()
     {
@@ -69,7 +91,7 @@ public sealed class OpenAiVoiceAssistantTests
             """);
 
         var client = new TestChatClient((_, index) => index == 0
-            ? ToolResult(OpenAiVoiceAssistant.LoadSkillToolName, """{"name":"room-temperature"}""")
+            ? ToolResult(LoadSkillTool.Name, """{"name":"room-temperature"}""")
             : Result("Rommet er 21 grader."));
         var assistant = CreateAssistant(client, new TestToolProvider(), new TestClock(),
             CreateSkillRegistry(directory.Path));
@@ -104,7 +126,7 @@ public sealed class OpenAiVoiceAssistantTests
         var toolSession = new TestToolSession("Added", toolName: "todo__HassListAddItem");
         var client = new TestChatClient((_, index) => index switch
         {
-            0 or 3 or 6 => ToolResult(OpenAiVoiceAssistant.LoadSkillToolName, """{"name":"shopping-list"}"""),
+            0 or 3 or 6 => ToolResult(LoadSkillTool.Name, """{"name":"shopping-list"}"""),
             1 or 4 => ToolResult("todo__HassListAddItem", """{"item":"requested batch"}"""),
             2 => Result("La til melk, skinke og ost. Skal jeg legge til noe mer?", requestFollowUp: true),
             5 => Result("La til brød. Noe mer?", requestFollowUp: true),
@@ -174,7 +196,7 @@ public sealed class OpenAiVoiceAssistantTests
     public async Task MissingApiKeyPreservesEchoWithoutCallingOpenAi()
     {
         var client = new TestChatClient((_, _) => throw new InvalidOperationException());
-        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(), CreateEmptySkillRegistry(),
+        var assistant = TestServices.Assistant(client, new TestToolProvider(), CreateEmptySkillRegistry(),
             new ConfigurationBuilder().Build(), new TestClock(), NullLogger<OpenAiVoiceAssistant>.Instance);
         Assert.Equal(new VoiceAssistantResponse("Hei"), await assistant.ReplyAsync("Hei", TestContext.Current.CancellationToken));
         Assert.Empty(client.Requests);
@@ -245,7 +267,7 @@ public sealed class OpenAiVoiceAssistantTests
         var session = new TestToolSession("private result", isError: true);
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key", ["Marvin:LogChatContent"] = "false" }).Build();
-        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(session), CreateEmptySkillRegistry(),
+        var assistant = TestServices.Assistant(client, new TestToolProvider(session), CreateEmptySkillRegistry(),
             configuration, new TestClock(), logger);
 
         await assistant.ReplyAsync("Spørsmål", TestContext.Current.CancellationToken);
@@ -283,7 +305,7 @@ public sealed class OpenAiVoiceAssistantTests
             ["OPENAI_API_KEY"] = "configured-secret",
             ["HomeAssistant:Token"] = "ha-secret"
         }).Build();
-        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(session), CreateEmptySkillRegistry(),
+        var assistant = TestServices.Assistant(client, new TestToolProvider(session), CreateEmptySkillRegistry(),
             configuration, new TestClock(), logger);
 
         var response = await assistant.ReplyAsync("Slå på configured-secret", TestContext.Current.CancellationToken);
@@ -320,14 +342,14 @@ public sealed class OpenAiVoiceAssistantTests
         var configuration = new ConfigurationBuilder().Build();
         var content = """{"data":"{\"password\":\"nested-secret\",\"room\":\"Stue\"}","token":"top-secret"}""";
 
-        var sanitized = ChatTelemetry.SanitizeJson(content, configuration);
+        var sanitized = TestServices.Telemetry(configuration).SanitizeJson(content);
 
         Assert.Contains("Stue", sanitized);
         Assert.DoesNotContain("nested-secret", sanitized);
         Assert.DoesNotContain("top-secret", sanitized);
-        Assert.Equal("[invalid JSON omitted]", ChatTelemetry.SanitizeJson("password: secret", configuration));
+        Assert.Equal("[invalid JSON omitted]", TestServices.Telemetry(configuration).SanitizeJson("password: secret"));
         Assert.Equal("[credential content omitted]",
-            ChatTelemetry.Sanitize("""Embedded {"password":"multiple words"}""", configuration));
+            TestServices.Telemetry(configuration).Sanitize("""Embedded {"password":"multiple words"}"""));
     }
 
     [Fact]
@@ -337,7 +359,7 @@ public sealed class OpenAiVoiceAssistantTests
         var client = new TestChatClient((_, _) => ToolResult("ask_user", "private invalid json"));
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
-        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(), CreateEmptySkillRegistry(),
+        var assistant = TestServices.Assistant(client, new TestToolProvider(), CreateEmptySkillRegistry(),
             configuration, new TestClock(), logger);
 
         await Assert.ThrowsAsync<InvalidDataException>(() =>
@@ -387,7 +409,7 @@ public sealed class OpenAiVoiceAssistantTests
         var client = new DelayedChatClient();
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
-        var assistant = new OpenAiVoiceAssistant(client, new TestToolProvider(), CreateEmptySkillRegistry(),
+        var assistant = TestServices.Assistant(client, new TestToolProvider(), CreateEmptySkillRegistry(),
             configuration, new TestClock(), NullLogger<OpenAiVoiceAssistant>.Instance);
         using var cancellation = new CancellationTokenSource();
         var oldTurn = assistant.ReplyAsync("Gammel", cancellation.Token);
@@ -407,7 +429,7 @@ public sealed class OpenAiVoiceAssistantTests
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["OPENAI_API_KEY"] = "test-key" }).Build();
-        return new OpenAiVoiceAssistant(client, tools, skillRegistry ?? CreateEmptySkillRegistry(), configuration,
+        return TestServices.Assistant(client, tools, skillRegistry ?? CreateEmptySkillRegistry(), configuration,
             clock, NullLogger<OpenAiVoiceAssistant>.Instance);
     }
 
@@ -415,7 +437,7 @@ public sealed class OpenAiVoiceAssistantTests
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["Skills:Directory"] = directory }).Build();
-        return new AgentSkillRegistry(configuration, NullLogger<AgentSkillRegistry>.Instance);
+        return new AgentSkillRegistry(TestServices.Skills(configuration), NullLogger<AgentSkillRegistry>.Instance);
     }
 
     private static AgentSkillRegistry CreateEmptySkillRegistry() =>

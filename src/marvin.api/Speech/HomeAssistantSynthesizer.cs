@@ -1,8 +1,10 @@
 using System.Buffers.Binary;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Marvin.Api.Configuration;
+using Microsoft.Extensions.Options;
 
-namespace Marvin.Api;
+namespace Marvin.Api.Speech;
 
 internal interface IVoiceSynthesizer
 {
@@ -11,26 +13,27 @@ internal interface IVoiceSynthesizer
 
 internal sealed class HomeAssistantSynthesizer(
     HttpClient client,
-    IConfiguration configuration,
+    IOptions<HomeAssistantOptions> options,
     ILogger<HomeAssistantSynthesizer> logger) : IVoiceSynthesizer
 {
     private const int MaxWavBytes = 16 * 1024 * 1024;
     private const string ProxyPrefix = "/api/tts_proxy/";
 
-    internal static bool IsConfigured(IConfiguration configuration) =>
-        !string.IsNullOrWhiteSpace(configuration["HomeAssistant:Url"])
-        && !string.IsNullOrWhiteSpace(configuration["HomeAssistant:Token"])
-        && !string.IsNullOrWhiteSpace(configuration["HomeAssistant:TtsEntity"]);
+    internal static bool IsConfigured(HomeAssistantOptions configuration) =>
+        !string.IsNullOrWhiteSpace(configuration.Url)
+        && !string.IsNullOrWhiteSpace(configuration.Token)
+        && !string.IsNullOrWhiteSpace(configuration.TtsEntity);
 
     public async Task<byte[]?> SynthesizeAsync(string text, CancellationToken cancellationToken)
     {
+        var configuration = options.Value;
         if (!IsConfigured(configuration))
         {
             logger.LogWarning("Skipping speech synthesis: Home Assistant TTS is not configured");
             return null;
         }
 
-        if (!Uri.TryCreate(configuration["HomeAssistant:Url"], UriKind.Absolute, out var baseUri)
+        if (!Uri.TryCreate(configuration.Url, UriKind.Absolute, out var baseUri)
             || (baseUri.Scheme != Uri.UriSchemeHttp && baseUri.Scheme != Uri.UriSchemeHttps)
             || !string.IsNullOrEmpty(baseUri.UserInfo)
             || baseUri.AbsolutePath != "/" || !string.IsNullOrEmpty(baseUri.Query)
@@ -38,10 +41,10 @@ internal sealed class HomeAssistantSynthesizer(
             throw new InvalidOperationException("HomeAssistant:Url must be an HTTP(S) origin without a path.");
 
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(baseUri, "/api/tts_get_url"));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", configuration["HomeAssistant:Token"]);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", configuration.Token);
         request.Content = JsonContent.Create(new
         {
-            engine_id = configuration["HomeAssistant:TtsEntity"],
+            engine_id = configuration.TtsEntity,
             message = text,
             cache = false,
             options = new

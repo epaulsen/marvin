@@ -45,7 +45,7 @@ public sealed class AgentSkillRegistryTests
         {
             ["Skills:Directory"] = directory
         }).Build();
-        return new AgentSkillRegistry(configuration, NullLogger<AgentSkillRegistry>.Instance);
+        return new AgentSkillRegistry(TestServices.Skills(configuration), NullLogger<AgentSkillRegistry>.Instance);
     }
 
     private static void WriteSkill(string root, string name, string content)

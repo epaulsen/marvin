@@ -19,6 +19,77 @@ namespace Marvin.Api.Tests;
 
 public sealed class VoiceGatewayTests
 {
+    [Fact]
+    public async Task TypedOptionsBindExistingConfigurationKeys()
+    {
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration(configuration => configuration.AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["OPENAI_API_KEY"] = "openai-test",
+                    ["OPPER_API_KEY"] = "opper-test",
+                    ["OpenAI:Model"] = "test-model",
+                    ["HomeAssistant:Url"] = "http://homeassistant.local:8123",
+                    ["HomeAssistant:Token"] = "home-test",
+                    ["HomeAssistant:TtsEntity"] = "tts.test",
+                    ["HomeAssistant:McpEnabled"] = "true",
+                    ["Marvin:LogChatContent"] = "false",
+                    ["Marvin:LogTranscripts"] = "true",
+                    ["Skills:Directory"] = "/tmp/marvin-test-skills"
+                }));
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IVoiceActivityDetectorFactory>();
+                services.AddSingleton<IVoiceActivityDetectorFactory, TestDetectorFactory>();
+            });
+        });
+
+        var keys = factory.Services.GetRequiredService<IOptions<ApiKeyOptions>>().Value;
+        var home = factory.Services.GetRequiredService<IOptions<HomeAssistantOptions>>().Value;
+        var marvin = factory.Services.GetRequiredService<IOptions<MarvinOptions>>().Value;
+        Assert.Equal("openai-test", keys.OpenAi);
+        Assert.Equal("opper-test", keys.Opper);
+        Assert.Equal("test-model", factory.Services.GetRequiredService<IOptions<OpenAiOptions>>().Value.Model);
+        Assert.Equal("http://homeassistant.local:8123", home.Url);
+        Assert.Equal("home-test", home.Token);
+        Assert.Equal("tts.test", home.TtsEntity);
+        Assert.True(home.McpEnabled);
+        Assert.False(marvin.LogChatContent);
+        Assert.True(marvin.LogTranscripts);
+        Assert.Equal("/tmp/marvin-test-skills", factory.Services.GetRequiredService<IOptions<SkillOptions>>().Value.Directory);
+    }
+
+    [Fact]
+    public async Task TypedOptionsReflectConfigurationReloads()
+    {
+        var source = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["OPENAI_API_KEY"] = "initial-key",
+            ["Marvin:LogChatContent"] = "true"
+        }).Build();
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration(configuration => configuration.AddConfiguration(source));
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IVoiceActivityDetectorFactory>();
+                services.AddSingleton<IVoiceActivityDetectorFactory, TestDetectorFactory>();
+            });
+        });
+        var keys = factory.Services.GetRequiredService<IOptions<ApiKeyOptions>>();
+        var options = factory.Services.GetRequiredService<IOptions<MarvinOptions>>();
+        Assert.Equal("initial-key", keys.Value.OpenAi);
+        Assert.True(options.Value.LogChatContent);
+
+        source["OPENAI_API_KEY"] = "updated-key";
+        source["Marvin:LogChatContent"] = "false";
+        source.Reload();
+
+        Assert.Equal("updated-key", keys.Value.OpenAi);
+        Assert.False(options.Value.LogChatContent);
+    }
+
     [Theory]
     [InlineData("", false)]
     [InlineData("http://127.0.0.1:4318", true)]
@@ -153,7 +224,7 @@ public sealed class VoiceGatewayTests
         var transcriber = new TestTranscriber();
         var synthesizer = new TestSynthesizer([1, 2, 3, 4]);
         var assistant = new TestAssistant("Hei tilbake");
-        var processor = new TranscribingVoiceTurnProcessor(
+        var processor = TestServices.Processor(
             transcriber, synthesizer, assistant, new ConfigurationBuilder().AddInMemoryCollection(
                 new Dictionary<string, string?> { ["OPPER_API_KEY"] = "test-key" }).Build(),
             NullLogger<TranscribingVoiceTurnProcessor>.Instance);
@@ -190,10 +261,10 @@ public sealed class VoiceGatewayTests
             ["OPENAI_API_KEY"] = "test-key",
             ["OPPER_API_KEY"] = "test-key"
         }).Build();
-        var assistant = new OpenAiVoiceAssistant(chat, new DisabledToolProvider(), CreateEmptySkillRegistry(),
+        var assistant = TestServices.Assistant(chat, new DisabledToolProvider(), CreateEmptySkillRegistry(),
             configuration, TimeProvider.System, NullLogger<OpenAiVoiceAssistant>.Instance);
         var synthesizer = new TestSynthesizer([1, 2, 3, 4]);
-        var processor = new TranscribingVoiceTurnProcessor(new TestTranscriber(), synthesizer, assistant,
+        var processor = TestServices.Processor(new TestTranscriber(), synthesizer, assistant,
             configuration, NullLogger<TranscribingVoiceTurnProcessor>.Instance);
         await using var factory = CreateFactory(processor);
         using var socket = await ConnectAsync(factory);
@@ -324,7 +395,7 @@ public sealed class VoiceGatewayTests
     public async Task WithoutApiKeyAudioIsNotTranscribed()
     {
         var transcriber = new TestTranscriber();
-        var processor = new TranscribingVoiceTurnProcessor(
+        var processor = TestServices.Processor(
             transcriber, new TestSynthesizer(null), new TestAssistant("unused"), new ConfigurationBuilder().Build(),
             NullLogger<TranscribingVoiceTurnProcessor>.Instance);
         Assert.Null(await processor.ProcessAsync([0, 0], TestContext.Current.CancellationToken));
@@ -335,7 +406,7 @@ public sealed class VoiceGatewayTests
     public async Task EmptyTranscriptDoesNotTriggerSpeech()
     {
         var synthesizer = new TestSynthesizer([1, 2]);
-        var processor = new TranscribingVoiceTurnProcessor(
+        var processor = TestServices.Processor(
             new TestTranscriber("  "), synthesizer, new TestAssistant("unused"),
             new ConfigurationBuilder().AddInMemoryCollection(
                 new Dictionary<string, string?> { ["OPPER_API_KEY"] = "test-key" }).Build(),
@@ -350,14 +421,14 @@ public sealed class VoiceGatewayTests
         var assistant = new TestAssistant("Hvilket rom?", requestFollowUp: true);
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?> { ["OPPER_API_KEY"] = "test-key" }).Build();
-        var processor = new TranscribingVoiceTurnProcessor(new TestTranscriber(), new TestSynthesizer([1, 2]),
+        var processor = TestServices.Processor(new TestTranscriber(), new TestSynthesizer([1, 2]),
             assistant, configuration, NullLogger<TranscribingVoiceTurnProcessor>.Instance);
         var response = await processor.ProcessAsync([0, 0], TestContext.Current.CancellationToken);
         Assert.NotNull(response);
         Assert.Equal(new byte[] { 1, 2 }, response.Audio);
         Assert.True(response.RequestFollowUp);
 
-        var withoutSpeech = new TranscribingVoiceTurnProcessor(new TestTranscriber(), new TestSynthesizer(null),
+        var withoutSpeech = TestServices.Processor(new TestTranscriber(), new TestSynthesizer(null),
             assistant, configuration, NullLogger<TranscribingVoiceTurnProcessor>.Instance);
         Assert.Null(await withoutSpeech.ProcessAsync([0, 0], TestContext.Current.CancellationToken));
     }
@@ -506,7 +577,7 @@ public sealed class VoiceGatewayTests
         {
             ["Skills:Directory"] = Path.Combine(Path.GetTempPath(), $"marvin-skills-{Guid.NewGuid():N}")
         }).Build();
-        return new AgentSkillRegistry(configuration, NullLogger<AgentSkillRegistry>.Instance);
+        return new AgentSkillRegistry(TestServices.Skills(configuration), NullLogger<AgentSkillRegistry>.Instance);
     }
 
     private static Task<WebSocket> ConnectAsync(WebApplicationFactory<Program> factory) =>

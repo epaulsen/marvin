@@ -1,4 +1,10 @@
-namespace Marvin.Api;
+using Marvin.Api.Configuration;
+using Marvin.Api.Chat;
+using Marvin.Api.Speech;
+using Marvin.Api.Telemetry;
+using Microsoft.Extensions.Options;
+
+namespace Marvin.Api.Voice;
 
 internal interface IVoiceTurnProcessor
 {
@@ -12,12 +18,14 @@ internal sealed class TranscribingVoiceTurnProcessor(
     IVoiceTranscriber transcriber,
     IVoiceSynthesizer synthesizer,
     IVoiceAssistant assistant,
-    IConfiguration configuration,
+    IOptions<ApiKeyOptions> apiKeys,
+    IOptions<MarvinOptions> options,
+    ChatTelemetry telemetry,
     ILogger<TranscribingVoiceTurnProcessor> logger) : IVoiceTurnProcessor
 {
     public async Task<VoiceTurnResponse?> ProcessAsync(byte[] audio, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(configuration["OPPER_API_KEY"]))
+        if (string.IsNullOrWhiteSpace(apiKeys.Value.Opper))
         {
             logger.LogWarning("Skipping transcription: OPPER_API_KEY is not configured");
             return null;
@@ -25,8 +33,8 @@ internal sealed class TranscribingVoiceTurnProcessor(
 
         logger.LogDebug("Starting transcription for {AudioBytes} PCM bytes", audio.Length);
         var text = await transcriber.TranscribeAsync(audio, cancellationToken);
-        if (configuration.GetValue<bool>("Marvin:LogTranscripts"))
-            logger.LogInformation("Transcript: {Transcript}", ChatTelemetry.Sanitize(text, configuration));
+        if (options.Value.LogTranscripts)
+            logger.LogInformation("Transcript: {Transcript}", telemetry.Sanitize(text));
         else
             logger.LogInformation("Transcription completed");
 

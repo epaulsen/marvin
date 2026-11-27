@@ -1,7 +1,9 @@
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
+using Marvin.Api.Configuration;
+using Microsoft.Extensions.Options;
 
-namespace Marvin.Api;
+namespace Marvin.Api.Skills;
 
 internal sealed record AgentSkill(string Name, string Description, string Instructions);
 
@@ -11,9 +13,9 @@ internal sealed class AgentSkillRegistry
     private readonly string skillsDirectory;
     private readonly ILogger<AgentSkillRegistry> logger;
 
-    public AgentSkillRegistry(IConfiguration configuration, ILogger<AgentSkillRegistry> logger)
+    public AgentSkillRegistry(IOptions<SkillOptions> options, ILogger<AgentSkillRegistry> logger)
     {
-        var configuredDirectory = configuration["Skills:Directory"];
+        var configuredDirectory = options.Value.Directory;
         skillsDirectory = Path.GetFullPath(
             string.IsNullOrWhiteSpace(configuredDirectory)
                 ? Path.Combine(AppContext.BaseDirectory, "skills")
