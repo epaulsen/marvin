@@ -20,12 +20,10 @@ if (builder.Environment.IsDevelopment())
 builder.Configuration.AddEnvironmentVariables().AddCommandLine(args);
 
 builder.Services.AddOptions<ApiKeyOptions>().BindConfiguration("");
-builder.Services.AddOptions<OpenAiOptions>().BindConfiguration("OpenAI");
 builder.Services.AddOptions<HomeAssistantOptions>().BindConfiguration("HomeAssistant");
-builder.Services.AddOptions<MarvinOptions>().BindConfiguration("Marvin");
+builder.Services.AddOptions<MarvinOptions>().BindConfiguration("Marvin").BindConfiguration("OpenAI");
 builder.Services.AddOptions<SkillOptions>().BindConfiguration("Skills");
 builder.Services.AddSingleton<IOptions<ApiKeyOptions>, ReloadingOptions<ApiKeyOptions>>();
-builder.Services.AddSingleton<IOptions<OpenAiOptions>, ReloadingOptions<OpenAiOptions>>();
 builder.Services.AddSingleton<IOptions<HomeAssistantOptions>, ReloadingOptions<HomeAssistantOptions>>();
 builder.Services.AddSingleton<IOptions<MarvinOptions>, ReloadingOptions<MarvinOptions>>();
 builder.Services.AddSingleton<IOptions<SkillOptions>, ReloadingOptions<SkillOptions>>();

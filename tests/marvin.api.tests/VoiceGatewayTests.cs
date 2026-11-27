@@ -50,7 +50,7 @@ public sealed class VoiceGatewayTests
         var marvin = factory.Services.GetRequiredService<IOptions<MarvinOptions>>().Value;
         Assert.Equal("openai-test", keys.OpenAi);
         Assert.Equal("opper-test", keys.Opper);
-        Assert.Equal("test-model", factory.Services.GetRequiredService<IOptions<OpenAiOptions>>().Value.Model);
+        Assert.Equal("test-model", marvin.Model);
         Assert.Equal("http://homeassistant.local:8123", home.Url);
         Assert.Equal("home-test", home.Token);
         Assert.Equal("tts.test", home.TtsEntity);
@@ -66,7 +66,8 @@ public sealed class VoiceGatewayTests
         var source = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["OPENAI_API_KEY"] = "initial-key",
-            ["Marvin:LogChatContent"] = "true"
+            ["Marvin:LogChatContent"] = "true",
+            ["OpenAI:Model"] = "initial-model"
         }).Build();
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
@@ -81,13 +82,16 @@ public sealed class VoiceGatewayTests
         var options = factory.Services.GetRequiredService<IOptions<MarvinOptions>>();
         Assert.Equal("initial-key", keys.Value.OpenAi);
         Assert.True(options.Value.LogChatContent);
+        Assert.Equal("initial-model", options.Value.Model);
 
         source["OPENAI_API_KEY"] = "updated-key";
         source["Marvin:LogChatContent"] = "false";
+        source["OpenAI:Model"] = "updated-model";
         source.Reload();
 
         Assert.Equal("updated-key", keys.Value.OpenAi);
         Assert.False(options.Value.LogChatContent);
+        Assert.Equal("updated-model", options.Value.Model);
     }
 
     [Theory]

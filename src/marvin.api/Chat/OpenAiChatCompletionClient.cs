@@ -4,7 +4,7 @@ using OpenAI.Chat;
 
 namespace Marvin.Api.Chat;
 
-internal sealed class OpenAiChatCompletionClient(IOptions<ApiKeyOptions> apiKeys, IOptions<OpenAiOptions> settings) : IChatCompletionClient
+internal sealed class OpenAiChatCompletionClient(IOptions<ApiKeyOptions> apiKeys, IOptions<MarvinOptions> settings) : IChatCompletionClient
 {
     private static readonly ChatResponseFormat VoiceResponseFormat = ChatResponseFormat.CreateJsonSchemaFormat(
         "voice_response",
@@ -14,7 +14,7 @@ internal sealed class OpenAiChatCompletionClient(IOptions<ApiKeyOptions> apiKeys
         jsonSchemaIsStrict: true);
     private ChatClient? client;
 
-    internal OpenAiChatCompletionClient(IOptions<ApiKeyOptions> apiKeys, IOptions<OpenAiOptions> settings, ChatClient client) : this(apiKeys, settings) =>
+    internal OpenAiChatCompletionClient(IOptions<ApiKeyOptions> apiKeys, IOptions<MarvinOptions> settings, ChatClient client) : this(apiKeys, settings) =>
         this.client = client;
 
     public async Task<ChatCompletion> CompleteAsync(IReadOnlyList<ChatMessage> messages, IReadOnlyList<ChatTool> tools,

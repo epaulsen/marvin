@@ -12,11 +12,13 @@ internal static class TestServices
     internal static IOptions<HomeAssistantOptions> HomeAssistant(IConfiguration configuration) =>
         Options.Create(configuration.GetSection("HomeAssistant").Get<HomeAssistantOptions>() ?? new HomeAssistantOptions());
 
-    internal static IOptions<OpenAiOptions> OpenAi(IConfiguration configuration) =>
-        Options.Create(configuration.GetSection("OpenAI").Get<OpenAiOptions>() ?? new OpenAiOptions());
-
-    internal static IOptions<MarvinOptions> Marvin(IConfiguration configuration) =>
-        Options.Create(configuration.GetSection("Marvin").Get<MarvinOptions>() ?? new MarvinOptions());
+    internal static IOptions<MarvinOptions> Marvin(IConfiguration configuration)
+    {
+        var options = new MarvinOptions();
+        configuration.GetSection("Marvin").Bind(options);
+        configuration.GetSection("OpenAI").Bind(options);
+        return Options.Create(options);
+    }
 
     internal static IOptions<SkillOptions> Skills(IConfiguration configuration) =>
         Options.Create(configuration.GetSection("Skills").Get<SkillOptions>() ?? new SkillOptions());
@@ -25,7 +27,7 @@ internal static class TestServices
         new(Keys(configuration), HomeAssistant(configuration));
 
     internal static OpenAiChatCompletionClient ChatClient(IConfiguration configuration, ChatClient client) =>
-        new(Keys(configuration), OpenAi(configuration), client);
+        new(Keys(configuration), Marvin(configuration), client);
 
     internal static OpenAiVoiceAssistant Assistant(IChatCompletionClient client, IAgentToolProvider provider,
         AgentSkillRegistry skills, IConfiguration configuration, TimeProvider clock, ILogger<OpenAiVoiceAssistant> logger)
@@ -34,8 +36,8 @@ internal static class TestServices
         var telemetry = Telemetry(configuration);
         var dispatcher = new AgentToolDispatcher(new AskUserTool(), new LoadSkillTool(),
             new ToolCallExecutor(options, telemetry, logger));
-        return new OpenAiVoiceAssistant(client, provider, skills, Keys(configuration), OpenAi(configuration),
-            options, telemetry, dispatcher, clock, logger);
+        return new OpenAiVoiceAssistant(client, provider, skills, Keys(configuration), options, telemetry,
+            dispatcher, clock, logger);
     }
 
     internal static TranscribingVoiceTurnProcessor Processor(IVoiceTranscriber transcriber, IVoiceSynthesizer synthesizer,

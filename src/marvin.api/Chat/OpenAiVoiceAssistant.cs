@@ -27,7 +27,6 @@ internal sealed class OpenAiVoiceAssistant(
     IAgentToolProvider toolProvider,
     AgentSkillRegistry skillRegistry,
     IOptions<ApiKeyOptions> apiKeys,
-    IOptions<OpenAiOptions> openAiOptions,
     IOptions<MarvinOptions> options,
     ChatTelemetry telemetry,
     AgentToolDispatcher toolDispatcher,
@@ -167,7 +166,7 @@ internal sealed class OpenAiVoiceAssistant(
     {
         using var activity = ChatTelemetry.Source.StartActivity("AI round");
         activity?.SetTag("marvin.chat.round", round);
-        activity?.SetTag("gen_ai.request.model", openAiOptions.Value.Model);
+        activity?.SetTag("gen_ai.request.model", options.Value.Model);
         logger.LogInformation("AI round {Round} started", round);
         try
         {
