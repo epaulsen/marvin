@@ -61,7 +61,7 @@ public sealed class VoiceGatewayTests
     }
 
     [Fact]
-    public async Task TypedOptionsReflectConfigurationReloads()
+    public async Task TypedOptionsRetainValuesUntilApplicationRestarts()
     {
         var source = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -69,7 +69,7 @@ public sealed class VoiceGatewayTests
             ["Marvin:LogChatContent"] = "true",
             ["OpenAI:Model"] = "initial-model"
         }).Build();
-        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        WebApplicationFactory<Program> CreateHost() => new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration(configuration => configuration.AddConfiguration(source));
             builder.ConfigureServices(services =>
@@ -78,20 +78,29 @@ public sealed class VoiceGatewayTests
                 services.AddSingleton<IVoiceActivityDetectorFactory, TestDetectorFactory>();
             });
         });
-        var keys = factory.Services.GetRequiredService<IOptions<ApiKeyOptions>>();
-        var options = factory.Services.GetRequiredService<IOptions<MarvinOptions>>();
-        Assert.Equal("initial-key", keys.Value.OpenAi);
-        Assert.True(options.Value.LogChatContent);
-        Assert.Equal("initial-model", options.Value.Model);
+        await using (var factory = CreateHost())
+        {
+            var keys = factory.Services.GetRequiredService<IOptions<ApiKeyOptions>>();
+            var options = factory.Services.GetRequiredService<IOptions<MarvinOptions>>();
+            Assert.Equal("initial-key", keys.Value.OpenAi);
+            Assert.True(options.Value.LogChatContent);
+            Assert.Equal("initial-model", options.Value.Model);
 
-        source["OPENAI_API_KEY"] = "updated-key";
-        source["Marvin:LogChatContent"] = "false";
-        source["OpenAI:Model"] = "updated-model";
-        source.Reload();
+            source["OPENAI_API_KEY"] = "updated-key";
+            source["Marvin:LogChatContent"] = "false";
+            source["OpenAI:Model"] = "updated-model";
+            source.Reload();
 
-        Assert.Equal("updated-key", keys.Value.OpenAi);
-        Assert.False(options.Value.LogChatContent);
-        Assert.Equal("updated-model", options.Value.Model);
+            Assert.Equal("initial-key", keys.Value.OpenAi);
+            Assert.True(options.Value.LogChatContent);
+            Assert.Equal("initial-model", options.Value.Model);
+        }
+
+        await using var restarted = CreateHost();
+        Assert.Equal("updated-key", restarted.Services.GetRequiredService<IOptions<ApiKeyOptions>>().Value.OpenAi);
+        var updated = restarted.Services.GetRequiredService<IOptions<MarvinOptions>>().Value;
+        Assert.False(updated.LogChatContent);
+        Assert.Equal("updated-model", updated.Model);
     }
 
     [Theory]
